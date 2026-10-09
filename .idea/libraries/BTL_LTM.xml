@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="BTL_LTM">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/dist/BTL_LTM.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
