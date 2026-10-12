@@ -92,6 +92,12 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     // Cạnh đang được rê chuột (hover): [type: "H"/"V", r, c]
     private HoverEdge hoveredEdge = null;
 
+    // Hộp thoại kết thúc trận đấu và điều khiển tái đấu
+    private JDialog gameOverDialog = null;
+    private AppUI.GradientButton btnRematchDialog = null;
+    private JLabel lblRematchNotice = null;
+    private volatile boolean isLeavingToLobby = false;
+
     /**
      * Khởi tạo màn hình bàn cờ với đầy đủ thông số
      */
@@ -718,6 +724,13 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     }
 
     private void backToLobby() {
+        isLeavingToLobby = true;
+        if (gameOverDialog != null && gameOverDialog.isShowing()) {
+            gameOverDialog.dispose();
+            gameOverDialog = null;
+        }
+        btnRematchDialog = null;
+        lblRematchNotice = null;
         stopTurnTimer();
         dispose();
         if (lobbyFrame != null) {
@@ -725,6 +738,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
             try {
                 // Đăng ký lại LobbyFrame nhận gói tin
                 SocketClient.getInstance().setMessageListener(lobbyFrame);
+                SocketClient.getInstance().send(Protocol.CMD_LEAVE_ROOM);
                 SocketClient.getInstance().send("GET_LOBBY");
             } catch (Exception ignored) {}
         }
@@ -736,7 +750,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
 
     @Override
     public void onMessageReceived(String message) {
-        if (message == null || message.trim().isEmpty()) return;
+        if (isLeavingToLobby || message == null || message.trim().isEmpty()) return;
 
         String[] parts = message.split(Protocol.DELIMITER);
         String cmd = parts[0];
@@ -802,10 +816,28 @@ public class GameBoardFrame extends JFrame implements MessageListener {
                     if (Protocol.RESP_ACCEPT.equalsIgnoreCase(parts[1])) {
                         resetGame();
                     } else {
-                        JOptionPane.showMessageDialog(this, "Đối thủ đã từ chối yêu cầu chơi tiếp!",
-                                "Thông báo", JOptionPane.INFORMATION_MESSAGE);
-                        backToLobby();
+                        if (isLeavingToLobby) return;
+                        boolean waitingRematch = (btnRematchDialog != null && "Đang chờ...".equals(btnRematchDialog.getText()));
+                        if (btnRematchDialog != null) {
+                            btnRematchDialog.setEnabled(false);
+                            btnRematchDialog.setText(waitingRematch ? "Đối thủ từ chối" : "Đối thủ đã rời");
+                        }
+                        if (lblRematchNotice != null) {
+                            lblRematchNotice.setText(waitingRematch 
+                                    ? "Đối thủ đã từ chối tái đấu. Vui lòng quay lại sảnh."
+                                    : "Đối thủ đã rời phòng. Vui lòng quay lại sảnh.");
+                            lblRematchNotice.setForeground(COLOR_RED_VAL);
+                        }
                     }
+                }
+                break;
+
+            case Protocol.CMD_CHALLENGE_INVITE:
+                // Tự động từ chối nếu nhận lời mời thách đấu khi đang ở trong phòng thi đấu
+                if (parts.length >= 2) {
+                    String challenger = parts[1].trim();
+                    SocketClient.getInstance().send(Protocol.CMD_CHALLENGE_RESP + Protocol.DELIMITER 
+                            + challenger + Protocol.DELIMITER + Protocol.RESP_REJECT);
                 }
                 break;
 
@@ -904,12 +936,15 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         }
 
         // Tạo Dialog hiện đại đồng bộ giao diện
-        JDialog dialog = new JDialog(this, "Kết thúc trận đấu", true);
-        dialog.setSize(440, 310);
-        dialog.setLocationRelativeTo(this);
-        dialog.setResizable(false);
-        dialog.setLayout(new BorderLayout());
-        dialog.getContentPane().setBackground(Color.WHITE);
+        if (gameOverDialog != null && gameOverDialog.isShowing()) {
+            gameOverDialog.dispose();
+        }
+        gameOverDialog = new JDialog(this, "Kết thúc trận đấu", true);
+        gameOverDialog.setSize(440, 310);
+        gameOverDialog.setLocationRelativeTo(this);
+        gameOverDialog.setResizable(false);
+        gameOverDialog.setLayout(new BorderLayout());
+        gameOverDialog.getContentPane().setBackground(Color.WHITE);
 
         JPanel body = new JPanel();
         body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
@@ -931,20 +966,19 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         lblFinalScore.setForeground(PRIMARY);
         lblFinalScore.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        JLabel lblReason = new JLabel(reasonDesc, SwingConstants.CENTER);
+        JLabel lblReason = new JLabel(reasonDesc.isEmpty() ? " " : reasonDesc, SwingConstants.CENTER);
         lblReason.setFont(new Font(AppUI.FONT, Font.PLAIN, 12));
         lblReason.setForeground(TEXT_MUTED);
         lblReason.setAlignmentX(Component.CENTER_ALIGNMENT);
+        lblRematchNotice = lblReason;
 
         body.add(lblTitle);
         body.add(Box.createVerticalStrut(10));
         body.add(lblStatus);
         body.add(Box.createVerticalStrut(10));
         body.add(lblFinalScore);
-        if (!reasonDesc.isEmpty()) {
-            body.add(Box.createVerticalStrut(6));
-            body.add(lblReason);
-        }
+        body.add(Box.createVerticalStrut(8));
+        body.add(lblReason);
 
         // 2 NÚT BẤM: "Chơi tiếp" và "Về sảnh"
         JPanel pnlBtns = new JPanel(new FlowLayout(FlowLayout.CENTER, 14, 0));
@@ -954,6 +988,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         AppUI.GradientButton btnRematch = new AppUI.GradientButton("Chơi tiếp");
         btnRematch.setPreferredSize(new Dimension(140, 42));
         btnRematch.setFont(new Font(AppUI.FONT, Font.BOLD, 14));
+        btnRematchDialog = btnRematch;
         btnRematch.addActionListener(e -> {
             btnRematch.setEnabled(false);
             btnRematch.setText("Đang chờ...");
@@ -988,7 +1023,13 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         btnLobby.setFocusPainted(false);
         btnLobby.setCursor(new Cursor(Cursor.HAND_CURSOR));
         btnLobby.addActionListener(e -> {
-            dialog.dispose();
+            isLeavingToLobby = true;
+            if (gameOverDialog != null) {
+                gameOverDialog.dispose();
+                gameOverDialog = null;
+            }
+            btnRematchDialog = null;
+            lblRematchNotice = null;
             SocketClient.getInstance().send(Protocol.CMD_LEAVE_ROOM);
             backToLobby();
         });
@@ -996,14 +1037,30 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         pnlBtns.add(btnRematch);
         pnlBtns.add(btnLobby);
 
-        dialog.add(body, BorderLayout.CENTER);
-        dialog.add(pnlBtns, BorderLayout.SOUTH);
-        dialog.setVisible(true);
+        gameOverDialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                isLeavingToLobby = true;
+                if (gameOverDialog != null) {
+                    gameOverDialog.dispose();
+                    gameOverDialog = null;
+                }
+                btnRematchDialog = null;
+                lblRematchNotice = null;
+                SocketClient.getInstance().send(Protocol.CMD_LEAVE_ROOM);
+                backToLobby();
+            }
+        });
+
+        gameOverDialog.add(body, BorderLayout.CENTER);
+        gameOverDialog.add(pnlBtns, BorderLayout.SOUTH);
+        gameOverDialog.setVisible(true);
     }
 
     private void handleRematchInvite() {
+        Component parent = (gameOverDialog != null && gameOverDialog.isShowing()) ? gameOverDialog : this;
         int opt = JOptionPane.showConfirmDialog(
-                this,
+                parent,
                 "Đối thủ muốn chơi tiếp ván mới!\nBạn có đồng ý không?",
                 "Lời mời tái đấu",
                 JOptionPane.YES_NO_OPTION,
@@ -1022,6 +1079,13 @@ public class GameBoardFrame extends JFrame implements MessageListener {
      * Khởi tạo lại trạng thái bàn cờ và điểm số cho ván đấu mới
      */
     private void resetGame() {
+        isLeavingToLobby = false;
+        if (gameOverDialog != null && gameOverDialog.isShowing()) {
+            gameOverDialog.dispose();
+            gameOverDialog = null;
+        }
+        btnRematchDialog = null;
+        lblRematchNotice = null;
         for (int r = 0; r < hLines.length; r++) {
             for (int c = 0; c < hLines[r].length; c++) {
                 hLines[r][c] = null;
@@ -1042,6 +1106,8 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         lblRedScore.setText("0");
         lblBlueScore.setText("0");
         lblMatchScore.setText("Tỉ số: 0 - 0");
+        this.currentTurn = Protocol.COLOR_RED;
+        updateTurnDisplay();
         startTurnTimer(30);
         boardPanel.repaint();
     }

@@ -35,10 +35,13 @@ public class LobbyFrame extends JFrame implements MessageListener {
     private JTable tblOnline;
     private JTable tblLeaderboard;
     private JLabel lblOnlineBadge;
+    private JLabel lblHeaderPoints;
+    private JLabel lblHeaderWins;
 
-    // Hộp thoại chờ phản hồi
+    // Hộp thoại chờ phản hồi và nhận lời mời
     private JDialog waitingDialog;
     private Timer spinnerTimer;
+    private JDialog inviteDialog = null;
 
     // Bảng màu (dùng chung tông với màn hình Đăng nhập / Đăng ký)
     private static final Color PRIMARY = AppUI.PRIMARY;
@@ -163,18 +166,22 @@ public class LobbyFrame extends JFrame implements MessageListener {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(0, 10, 0, 0);
 
+        lblHeaderPoints = new JLabel(String.valueOf(currentPoints));
+        lblHeaderWins = new JLabel(String.valueOf(currentWins));
+        JLabel lblHeaderUser = new JLabel(currentUser);
+
         pnlProfile.add(createHeaderChip(new StarVectorIcon(20, new Color(252, 211, 77)),
-                "ĐIỂM", String.valueOf(currentPoints)), gbc);
+                "ĐIỂM", lblHeaderPoints), gbc);
         pnlProfile.add(createHeaderChip(new TrophyVectorIcon(20, Color.WHITE),
-                "SỐ TRẬN", String.valueOf(currentWins)), gbc);
+                "SỐ TRẬN", lblHeaderWins), gbc);
         pnlProfile.add(createHeaderChip(new AvatarIcon(32, currentUser, Color.WHITE, PRIMARY),
-                "TÀI KHOẢN", currentUser), gbc);
+                "TÀI KHOẢN", lblHeaderUser), gbc);
 
         header.add(pnlProfile, BorderLayout.EAST);
         return header;
     }
 
-    private JPanel createHeaderChip(Icon icon, String label, String value) {
+    private JPanel createHeaderChip(Icon icon, String label, JLabel lblV) {
         JPanel chip = new JPanel(new BorderLayout(10, 0)) {
             @Override
             protected void paintComponent(Graphics g) {
@@ -201,7 +208,6 @@ public class LobbyFrame extends JFrame implements MessageListener {
         lblL.setFont(new Font(FONT, Font.BOLD, 10));
         lblL.setForeground(new Color(255, 255, 255, 190));
 
-        JLabel lblV = new JLabel(value);
         lblV.setFont(new Font(FONT, Font.BOLD, 16));
         lblV.setForeground(Color.WHITE);
 
@@ -738,13 +744,20 @@ public class LobbyFrame extends JFrame implements MessageListener {
         String[] parts = message.split(Protocol.DELIMITER);
         String cmd = parts[0];
 
-        if (Protocol.CMD_LOBBY_DATA.equals(cmd)) {
+        if (Protocol.CMD_LOGIN_SUCCESS.equals(cmd)) {
+            if (parts.length >= 4) {
+                if (lblHeaderPoints != null) lblHeaderPoints.setText(parts[2].trim());
+                if (lblHeaderWins != null) lblHeaderWins.setText(parts[3].trim());
+            }
+        } else if (Protocol.CMD_LOBBY_DATA.equals(cmd)) {
             if (parts.length > 1) updateOnlineTable(parts[1]);
+            else updateOnlineTable("");
         } else if (Protocol.CMD_LEADERBOARD.equals(cmd)) {
             if (parts.length > 1) updateLeaderboardTable(parts[1]);
         } else if (Protocol.CMD_CHALLENGE_INVITE.equals(cmd)) {
             if (parts.length > 1) showChallengeInviteDialog(parts[1]);
         } else if (Protocol.CMD_CHALLENGE_CANCEL.equals(cmd)) {
+            closeChallengeInviteDialog();
             JOptionPane.showMessageDialog(this, "Đối thủ đã hủy yêu cầu thách đấu!", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
         } else if (Protocol.CMD_CHALLENGE_RESP.equals(cmd)) {
             closeWaitingDialog();
@@ -753,6 +766,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
             }
         } else if (Protocol.CMD_START_GAME.equals(cmd)) {
             closeWaitingDialog();
+            closeChallengeInviteDialog();
             String opponent = parts.length > 1 ? parts[1] : "Đối thủ";
             String myColor = parts.length > 2 ? parts[2] : Protocol.COLOR_RED;
             String startingTurn = parts.length > 3 ? parts[3] : Protocol.COLOR_RED;
@@ -769,6 +783,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
     @Override
     public void onDisconnected(String reason) {
         closeWaitingDialog();
+        closeChallengeInviteDialog();
         JOptionPane.showMessageDialog(this,
                 "Mất kết nối tới Server!\nVui lòng đăng nhập lại.",
                 "Mất kết nối", JOptionPane.WARNING_MESSAGE);
@@ -788,9 +803,14 @@ public class LobbyFrame extends JFrame implements MessageListener {
         for (String record : userRecords) {
             String[] fields = record.split(",");
             if (fields.length >= 4) {
+                String uname = fields[0].trim();
+                if (uname.equalsIgnoreCase(currentUser)) {
+                    if (lblHeaderPoints != null) lblHeaderPoints.setText(fields[1].trim());
+                    if (lblHeaderWins != null) lblHeaderWins.setText(fields[2].trim());
+                }
                 count++;
                 modelOnline.addRow(new Object[]{
-                        fields[0].trim(),
+                        uname,
                         fields[1].trim(),
                         fields[2].trim(),
                         fields[3].trim(),
@@ -810,6 +830,10 @@ public class LobbyFrame extends JFrame implements MessageListener {
         for (String record : rankRecords) {
             String[] fields = record.split(",");
             if (fields.length >= 3) {
+                if (fields[0].trim().equalsIgnoreCase(currentUser)) {
+                    if (lblHeaderPoints != null) lblHeaderPoints.setText(fields[1].trim());
+                    if (lblHeaderWins != null) lblHeaderWins.setText(fields[2].trim());
+                }
                 modelLeaderboard.addRow(new Object[]{
                         String.valueOf(rank++),
                         fields[0].trim(),
@@ -848,12 +872,25 @@ public class LobbyFrame extends JFrame implements MessageListener {
     }
 
     private void showChallengeInviteDialog(String challenger) {
-        JDialog dialog = new JDialog(this, "Lời mời thách đấu", true);
-        dialog.setSize(420, 290);
-        dialog.setLocationRelativeTo(this);
-        dialog.setResizable(false);
-        dialog.getContentPane().setBackground(Color.WHITE);
-        dialog.setLayout(new BorderLayout());
+        closeChallengeInviteDialog();
+
+        inviteDialog = new JDialog(this, "Lời mời thách đấu", true);
+        inviteDialog.setSize(420, 290);
+        inviteDialog.setLocationRelativeTo(this);
+        inviteDialog.setResizable(false);
+        inviteDialog.getContentPane().setBackground(Color.WHITE);
+        inviteDialog.setLayout(new BorderLayout());
+
+        // Đóng bằng nút X coi như từ chối
+        inviteDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        inviteDialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                closeChallengeInviteDialog();
+                SocketClient.getInstance().send(Protocol.CMD_CHALLENGE_RESP + Protocol.DELIMITER
+                        + challenger + Protocol.DELIMITER + Protocol.RESP_REJECT);
+            }
+        });
 
         JPanel body = createDialogBody();
         JLabel lblIcon = new JLabel(new TileIcon(56, new SwordsVectorIcon(24, Color.WHITE), PRIMARY, ACCENT));
@@ -870,7 +907,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
         btnAccept.setFont(new Font(FONT, Font.BOLD, 14));
         btnAccept.setPreferredSize(new Dimension(150, 42));
         btnAccept.addActionListener(e -> {
-            dialog.dispose();
+            closeChallengeInviteDialog();
             if (!SocketClient.getInstance().send(Protocol.CMD_CHALLENGE_RESP + Protocol.DELIMITER
                     + challenger + Protocol.DELIMITER + Protocol.RESP_ACCEPT)) {
                 AppUI.showConnectionError(this);
@@ -879,7 +916,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
 
         SoftButton btnReject = SoftButton.danger("Từ chối");
         btnReject.addActionListener(e -> {
-            dialog.dispose();
+            closeChallengeInviteDialog();
             if (!SocketClient.getInstance().send(Protocol.CMD_CHALLENGE_RESP + Protocol.DELIMITER
                     + challenger + Protocol.DELIMITER + Protocol.RESP_REJECT)) {
                 AppUI.showConnectionError(this);
@@ -889,9 +926,17 @@ public class LobbyFrame extends JFrame implements MessageListener {
         pnlBtns.add(btnAccept);
         pnlBtns.add(btnReject);
 
-        dialog.add(body, BorderLayout.CENTER);
-        dialog.add(pnlBtns, BorderLayout.SOUTH);
-        dialog.setVisible(true);
+        inviteDialog.add(body, BorderLayout.CENTER);
+        inviteDialog.add(pnlBtns, BorderLayout.SOUTH);
+        inviteDialog.setVisible(true);
+    }
+
+    public void closeChallengeInviteDialog() {
+        if (inviteDialog != null) {
+            inviteDialog.setVisible(false);
+            inviteDialog.dispose();
+            inviteDialog = null;
+        }
     }
 
     public void showWaitingChallengeDialog(String targetUser) {

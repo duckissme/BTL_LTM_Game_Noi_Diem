@@ -33,7 +33,7 @@ import javax.swing.SwingUtilities;
 public class SocketClient {
 
     /** Địa chỉ Server mặc định (dùng khi chạy thử trên cùng 1 máy) */
-    public static final String DEFAULT_HOST = "127.0.0.1";
+    public static final String DEFAULT_HOST = "localhost";
     public static final int DEFAULT_PORT = 8888;
 
     /** Chờ tối đa 5 giây khi kết nối, quá thời gian thì báo lỗi thay vì treo chương trình */

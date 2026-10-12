@@ -10,8 +10,10 @@ import java.util.Properties;
 
 /**
  * Quản lý kết nối cơ sở dữ liệu MySQL.
- * Toàn bộ thông tin cấu hình nhạy cảm (URL, User, Password) được giấu và nạp động
- * từ file cấu hình 'db.properties' hoặc biến môi trường, không lưu cứng trong mã nguồn.
+ * Toàn bộ thông tin cấu hình nhạy cảm (URL, User, Password) được giấu và nạp
+ * động
+ * từ file cấu hình 'db.properties' hoặc biến môi trường, không lưu cứng trong
+ * mã nguồn.
  */
 public class DBConnection {
 
@@ -24,7 +26,8 @@ public class DBConnection {
      * Nạp cấu hình từ file db.properties (classpath hoặc thư mục gốc ứng dụng).
      */
     private static synchronized void loadConfig() {
-        if (isLoaded) return;
+        if (isLoaded)
+            return;
 
         Properties props = new Properties();
 
@@ -33,7 +36,8 @@ public class DBConnection {
             if (in != null) {
                 props.load(in);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         // 2. Thử nạp từ thư mục hiện tại của ứng dụng
         if (props.isEmpty()) {
@@ -41,7 +45,8 @@ public class DBConnection {
             if (propFile.exists()) {
                 try (InputStream in = new FileInputStream(propFile)) {
                     props.load(in);
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             }
         }
 
@@ -57,6 +62,7 @@ public class DBConnection {
 
     /**
      * Lấy kết nối tới MySQL.
+     * 
      * @return Connection hoặc null nếu kết nối thất bại
      */
     public static Connection getConnection() {
@@ -69,7 +75,8 @@ public class DBConnection {
             return null;
         } catch (SQLException e) {
             System.err.println("[DBConnection] Lỗi kết nối CSDL MySQL: " + e.getMessage());
-            System.err.println("[DBConnection] Hãy chắc chắn dịch vụ MySQL (XAMPP/MySQL) đã được bật và file db.properties đã cấu hình đúng.");
+            System.err.println(
+                    "[DBConnection] Hãy chắc chắn dịch vụ MySQL (XAMPP/MySQL) đã được bật và file db.properties đã cấu hình đúng.");
             return null;
         }
     }

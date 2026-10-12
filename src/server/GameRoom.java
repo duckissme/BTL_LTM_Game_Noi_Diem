@@ -2,6 +2,7 @@ package server;
 
 import common.Protocol;
 import database.MatchDAO;
+import database.UserDAO;
 import java.awt.Point;
 import java.util.List;
 
@@ -124,7 +125,7 @@ public class GameRoom {
         ClientHandler winner = getOpponent(sender);
         String winnerUser = (winner != null && winner.getPlayerInfo() != null) ? winner.getPlayerInfo().getUsername() : "UNKNOWN";
         broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER + winnerUser + Protocol.DELIMITER + "SURRENDER");
-        saveResult();
+        saveResult(winnerUser);
         isFinished = true;
     }
 
@@ -137,15 +138,29 @@ public class GameRoom {
         String winner = engine.getWinner(redUser, blueUser);
 
         broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER + winner + Protocol.DELIMITER + reason);
-        saveResult();
+        saveResult(winner);
     }
 
-    private void saveResult() {
+    private void saveResult(String winner) {
         if (playerRed != null && playerBlue != null) {
             String redUser = playerRed.getPlayerInfo().getUsername();
             String blueUser = playerBlue.getPlayerInfo().getUsername();
-            MatchDAO.saveMatchResult(redUser, blueUser, engine.getScoreRed(), engine.getScoreBlue());
+            boolean ok = MatchDAO.saveMatchResult(redUser, blueUser, engine.getScoreRed(), engine.getScoreBlue(), winner);
+            if (ok) {
+                UserDAO.refreshPlayerInfo(playerRed.getPlayerInfo());
+                UserDAO.refreshPlayerInfo(playerBlue.getPlayerInfo());
+            }
         }
+    }
+
+    /**
+     * Khởi tạo lại phòng thi đấu khi 2 bên đồng ý tái đấu (Rematch).
+     */
+    public synchronized void reset() {
+        engine.reset();
+        isFinished = false;
+        currentTurn = Protocol.COLOR_RED;
+        broadcast(Protocol.CMD_CHANGE_TURN + Protocol.DELIMITER + currentTurn + Protocol.DELIMITER + "30");
     }
 
     public void broadcast(String message) {

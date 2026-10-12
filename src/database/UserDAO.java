@@ -97,4 +97,48 @@ public class UserDAO {
         }
         return rankStr.toString();
     }
+
+    public static void refreshPlayerInfo(Player player) {
+        if (player == null || player.getUsername() == null) return;
+        String query = "SELECT total_score, total_matches FROM users WHERE username = ?";
+        try (Connection conn = DBConnection.getConnection()) {
+            if (conn == null) {
+                System.err.println("[UserDAO] Không có kết nối tới cơ sở dữ liệu khi làm mới thông tin player!");
+                return;
+            }
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, player.getUsername());
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        player.setScore(rs.getInt("total_score"));
+                        player.setTotalMatches(rs.getInt("total_matches"));
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Lỗi làm mới thông tin player [" + player.getUsername() + "]: " + e.getMessage());
+        }
+    }
+
+    public static Player getUserByUsername(String username) {
+        if (username == null) return null;
+        String query = "SELECT total_score, total_matches FROM users WHERE username = ?";
+        try (Connection conn = DBConnection.getConnection()) {
+            if (conn == null) {
+                System.err.println("[UserDAO] Không có kết nối tới cơ sở dữ liệu khi tìm player!");
+                return null;
+            }
+            try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+                pstmt.setString(1, username);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        return new Player(username, rs.getInt("total_score"), rs.getInt("total_matches"));
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Lỗi truy vấn thông tin player [" + username + "]: " + e.getMessage());
+        }
+        return null;
+    }
 }

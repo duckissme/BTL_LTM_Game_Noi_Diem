@@ -13,6 +13,7 @@ public class ClientHandler extends Thread {
     private BufferedReader in;
     private PrintWriter out;
     private Player playerInfo = null;
+    private volatile String pendingChallengeTarget = null;
 
     public ClientHandler(Socket socket) {
         this.socket = socket;
@@ -58,6 +59,12 @@ public class ClientHandler extends Thread {
                         break;
                     case Protocol.CMD_CHALLENGE_CANCEL:
                         handleChallengeCancel(parts);
+                        break;
+                    case Protocol.CMD_REMATCH_REQ:
+                        handleRematchReq();
+                        break;
+                    case Protocol.CMD_REMATCH_RESP:
+                        handleRematchResp(parts);
                         break;
                     case Protocol.CMD_MOVE:
                         if (parts.length >= 4 && playerInfo != null) {
@@ -150,6 +157,18 @@ public class ClientHandler extends Thread {
     }
 
     private void handleGetLobby() {
+        if (playerInfo != null) {
+            GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
+            if (room == null) {
+                playerInfo.setStatus(PlayerStatus.FREE);
+            }
+            UserDAO.refreshPlayerInfo(playerInfo);
+            // Gửi dữ liệu cập nhật điểm số và số trận của chính mình
+            sendMessage(Protocol.CMD_LOGIN_SUCCESS + Protocol.DELIMITER 
+                    + playerInfo.getUsername() + Protocol.DELIMITER 
+                    + playerInfo.getScore() + Protocol.DELIMITER 
+                    + playerInfo.getTotalMatches());
+        }
         String myUsername = (playerInfo != null) ? playerInfo.getUsername() : null;
         sendMessage(Server.buildLobbyData(myUsername));
         sendMessage(Protocol.CMD_LEADERBOARD + Protocol.DELIMITER + UserDAO.getLeaderboard());
@@ -170,6 +189,7 @@ public class ClientHandler extends Thread {
             return;
         }
 
+        this.pendingChallengeTarget = target;
         targetHandler.sendMessage(Protocol.CMD_CHALLENGE_INVITE + Protocol.DELIMITER + this.playerInfo.getUsername());
     }
 
@@ -180,6 +200,15 @@ public class ClientHandler extends Thread {
 
         ClientHandler challengerHandler = Server.onlineUsers.get(challenger);
         if (challengerHandler == null || challengerHandler.playerInfo == null) return;
+
+        // Nếu người gửi lời mời đã hủy hoặc lời mời không còn hướng tới người này
+        if (challengerHandler.pendingChallengeTarget == null 
+                || !challengerHandler.pendingChallengeTarget.equalsIgnoreCase(this.playerInfo.getUsername())) {
+            this.sendMessage(Protocol.CMD_CHALLENGE_CANCEL);
+            return;
+        }
+
+        challengerHandler.pendingChallengeTarget = null;
 
         if (Protocol.RESP_REJECT.equalsIgnoreCase(resp)) {
             challengerHandler.sendMessage(Protocol.CMD_CHALLENGE_RESP + Protocol.DELIMITER 
@@ -199,6 +228,7 @@ public class ClientHandler extends Thread {
     }
 
     private void handleChallengeCancel(String[] parts) {
+        this.pendingChallengeTarget = null;
         if (parts.length < 2) return;
         String target = parts[1].trim();
         ClientHandler targetHandler = Server.onlineUsers.get(target);
@@ -207,14 +237,61 @@ public class ClientHandler extends Thread {
         }
     }
 
+    private void handleRematchReq() {
+        if (this.playerInfo == null) return;
+        GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
+        if (room == null) {
+            sendMessage(Protocol.CMD_REMATCH_RESP + Protocol.DELIMITER + Protocol.RESP_REJECT);
+            return;
+        }
+
+        ClientHandler opponent = room.getOpponent(this);
+        if (opponent == null || opponent.playerInfo == null) {
+            sendMessage(Protocol.CMD_REMATCH_RESP + Protocol.DELIMITER + Protocol.RESP_REJECT);
+            return;
+        }
+
+        opponent.sendMessage(Protocol.CMD_REMATCH_INVITE);
+    }
+
+    private void handleRematchResp(String[] parts) {
+        if (parts.length < 2 || playerInfo == null) return;
+        String resp = parts[1].trim();
+
+        GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
+        if (room == null) return;
+
+        ClientHandler opponent = room.getOpponent(this);
+        if (opponent != null) {
+            opponent.sendMessage(Protocol.CMD_REMATCH_RESP + Protocol.DELIMITER + resp);
+        }
+
+        if (Protocol.RESP_ACCEPT.equalsIgnoreCase(resp)) {
+            // Tái đấu: reset phòng thi đấu
+            room.reset();
+        } else {
+            // Từ chối: giải phóng phòng và chuyển người gửi từ chối sang rỗi
+            RoomManager.removeRoom(room.getRoomId());
+            this.playerInfo.setStatus(PlayerStatus.FREE);
+            Server.broadcastLobbyData();
+        }
+    }
+
     private void handleLeaveRoom() {
         if (this.playerInfo != null) {
             GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
             if (room != null) {
+                ClientHandler opponent = room.getOpponent(this);
+                if (opponent != null) {
+                    // Không chuyển opponent sang FREE tại đây vì opponent vẫn đang ở bàn cờ/popup!
+                    // Chỉ gửi thông báo để opponent biết đối thủ đã rời phòng.
+                    opponent.sendMessage(Protocol.CMD_REMATCH_RESP + Protocol.DELIMITER + Protocol.RESP_REJECT);
+                }
                 room.handleSurrender(this);
                 RoomManager.removeRoom(room.getRoomId());
             }
             this.playerInfo.setStatus(PlayerStatus.FREE);
+            UserDAO.refreshPlayerInfo(this.playerInfo);
             Server.broadcastLobbyData();
         }
     }
@@ -223,9 +300,14 @@ public class ClientHandler extends Thread {
         if (this.playerInfo != null) {
             GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
             if (room != null) {
+                ClientHandler opponent = room.getOpponent(this);
+                if (opponent != null) {
+                    opponent.sendMessage(Protocol.CMD_REMATCH_RESP + Protocol.DELIMITER + Protocol.RESP_REJECT);
+                }
                 room.handleSurrender(this);
                 RoomManager.removeRoom(room.getRoomId());
             }
+            this.pendingChallengeTarget = null;
             Server.onlineUsers.remove(this.playerInfo.getUsername());
             System.out.println("=> User [" + this.playerInfo.getUsername() + "] đã đăng xuất.");
             this.playerInfo = null;
