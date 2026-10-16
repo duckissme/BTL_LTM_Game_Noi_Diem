@@ -5,11 +5,23 @@ import database.MatchDAO;
 import database.UserDAO;
 import java.awt.Point;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * GameRoom: Quản lý một phòng đấu 1vs1 giữa 2 người chơi.
+ * Server tự đếm giờ mỗi lượt: hết Protocol.TURN_TIME_SECONDS giây mà chưa đi thì mất lượt.
  */
 public class GameRoom {
+
+    /** Bộ hẹn giờ dùng chung cho mọi phòng (luồng daemon, tự tắt cùng Server) */
+    private static final ScheduledExecutorService TURN_TIMER = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "Turn-Timer");
+        t.setDaemon(true);
+        return t;
+    });
 
     private final String roomId;
     private final ClientHandler playerRed;
@@ -18,6 +30,15 @@ public class GameRoom {
 
     private String currentTurn; // Protocol.COLOR_RED hoặc Protocol.COLOR_BLUE
     private boolean isFinished = false;
+
+    private ScheduledFuture<?> turnTimeoutTask;
+    // Tăng mỗi lần bắt đầu đếm giờ lượt mới. Hẹn giờ cũ chạy trễ (người chơi vừa đi đúng lúc hết giờ)
+    // sẽ thấy số này đã đổi và tự bỏ qua.
+    private int turnSeq = 0;
+
+    // Số lần hết giờ LIÊN TIẾP của mỗi phe (đi được 1 nước thì về 0)
+    private int timeoutsRed = 0;
+    private int timeoutsBlue = 0;
 
     public GameRoom(String roomId, ClientHandler playerRed, ClientHandler playerBlue) {
         this.roomId = roomId;
@@ -50,19 +71,20 @@ public class GameRoom {
     }
 
     /**
-     * Bắt đầu ván đấu: gửi START_GAME tới cả 2 client.
+     * Bắt đầu ván đấu: gửi START_GAME tới cả 2 client và bắt đầu đếm giờ lượt đầu tiên.
      */
-    public void start() {
+    public synchronized void start() {
         if (playerRed != null && playerBlue != null) {
-            playerRed.sendMessage(Protocol.CMD_START_GAME + Protocol.DELIMITER 
-                    + playerBlue.getPlayerInfo().getUsername() + Protocol.DELIMITER 
-                    + Protocol.COLOR_RED + Protocol.DELIMITER 
+            playerRed.sendMessage(Protocol.CMD_START_GAME + Protocol.DELIMITER
+                    + playerBlue.getPlayerInfo().getUsername() + Protocol.DELIMITER
+                    + Protocol.COLOR_RED + Protocol.DELIMITER
                     + currentTurn);
 
-            playerBlue.sendMessage(Protocol.CMD_START_GAME + Protocol.DELIMITER 
-                    + playerRed.getPlayerInfo().getUsername() + Protocol.DELIMITER 
-                    + Protocol.COLOR_BLUE + Protocol.DELIMITER 
+            playerBlue.sendMessage(Protocol.CMD_START_GAME + Protocol.DELIMITER
+                    + playerRed.getPlayerInfo().getUsername() + Protocol.DELIMITER
+                    + Protocol.COLOR_BLUE + Protocol.DELIMITER
                     + currentTurn);
+            restartTurnTimer();
         }
     }
 
@@ -82,6 +104,9 @@ public class GameRoom {
             return;
         }
 
+        // Đi được nước hợp lệ -> xóa chuỗi hết giờ liên tiếp của người này
+        if (sender == playerRed) timeoutsRed = 0; else timeoutsBlue = 0;
+
         // 1. Đặt cạnh
         engine.placeLine(type, r, c);
         broadcast(Protocol.CMD_DRAW_LINE + Protocol.DELIMITER + type + Protocol.DELIMITER + r + Protocol.DELIMITER + c + Protocol.DELIMITER + senderColor);
@@ -100,12 +125,12 @@ public class GameRoom {
 
             // Kiểm tra kết thúc ván
             if (engine.isGameOver()) {
-                finishGame("FULL_BOARD");
+                finishGame(Protocol.REASON_FULL_BOARD);
                 return;
             }
 
-            // Ăn được ô -> GIỮ LƯỢT đi tiếp (luật Dots & Boxes chuẩn)
-            broadcast(Protocol.CMD_CHANGE_TURN + Protocol.DELIMITER + currentTurn + Protocol.DELIMITER + "30");
+            // Ăn được ô -> GIỮ LƯỢT đi tiếp (luật Dots & Boxes chuẩn), đếm lại giờ từ đầu
+            announceTurn();
         } else {
             // Không ăn được ô -> ĐỔI LƯỢT
             switchTurn();
@@ -114,38 +139,101 @@ public class GameRoom {
 
     private void switchTurn() {
         currentTurn = Protocol.COLOR_RED.equalsIgnoreCase(currentTurn) ? Protocol.COLOR_BLUE : Protocol.COLOR_RED;
-        broadcast(Protocol.CMD_CHANGE_TURN + Protocol.DELIMITER + currentTurn + Protocol.DELIMITER + "30");
+        announceTurn();
+    }
+
+    /**
+     * Báo lượt hiện tại cho 2 người (CHANGE_TURN) và bắt đầu đếm giờ lượt đó.
+     */
+    private void announceTurn() {
+        broadcast(Protocol.CMD_CHANGE_TURN + Protocol.DELIMITER + currentTurn + Protocol.DELIMITER + Protocol.TURN_TIME_SECONDS);
+        restartTurnTimer();
+    }
+
+    // =========================================================================
+    // ĐẾM GIỜ MỖI LƯỢT
+    // =========================================================================
+
+    private void restartTurnTimer() {
+        cancelTurnTimer();
+        final int seq = ++turnSeq;
+        turnTimeoutTask = TURN_TIMER.schedule(() -> handleTurnTimeout(seq), Protocol.TURN_TIME_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private void cancelTurnTimer() {
+        if (turnTimeoutTask != null) {
+            turnTimeoutTask.cancel(false);
+            turnTimeoutTask = null;
+        }
+    }
+
+    /**
+     * Chạy trên luồng Turn-Timer khi hết giờ: người đang giữ lượt bị mất lượt,
+     * hết giờ Protocol.MAX_CONSECUTIVE_TIMEOUTS lần liên tiếp thì bị xử thua.
+     */
+    private synchronized void handleTurnTimeout(int seq) {
+        // Trận đã kết thúc, hoặc người chơi đã kịp đi (đã sang lượt đếm giờ mới) -> bỏ qua
+        if (isFinished || seq != turnSeq) return;
+
+        boolean redTimedOut = Protocol.COLOR_RED.equalsIgnoreCase(currentTurn);
+        int count = redTimedOut ? ++timeoutsRed : ++timeoutsBlue;
+        broadcast(Protocol.CMD_TURN_TIMEOUT + Protocol.DELIMITER + currentTurn + Protocol.DELIMITER + count);
+
+        if (count >= Protocol.MAX_CONSECUTIVE_TIMEOUTS) {
+            forfeit(redTimedOut ? playerRed : playerBlue, Protocol.REASON_TIMEOUT);
+        } else {
+            switchTurn();
+        }
     }
 
     /**
      * Xử lý xin hàng / đầu hàng.
      */
     public synchronized void handleSurrender(ClientHandler sender) {
+        forfeit(sender, Protocol.REASON_SURRENDER);
+    }
+
+    /**
+     * Xử thua người chơi loser (bỏ cuộc hoặc hết giờ quá số lần): đối thủ thắng bất kể tỉ số.
+     */
+    private void forfeit(ClientHandler loser, String reason) {
         if (isFinished) return;
-        ClientHandler winner = getOpponent(sender);
-        String winnerUser = (winner != null && winner.getPlayerInfo() != null) ? winner.getPlayerInfo().getUsername() : "UNKNOWN";
-        broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER + winnerUser + Protocol.DELIMITER + "SURRENDER");
-        saveResult(winnerUser);
         isFinished = true;
+        cancelTurnTimer();
+        ClientHandler winner = getOpponent(loser);
+        String winnerUser = (winner != null && winner.getPlayerInfo() != null) ? winner.getPlayerInfo().getUsername() : "UNKNOWN";
+        broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER + winnerUser + Protocol.DELIMITER + reason);
+        saveResult(winnerUser, reason);
+    }
+
+    /**
+     * Chuyển tiếp tin nhắn chat tới cả 2 người chơi (người gửi cũng nhận lại để hiển thị).
+     */
+    public void handleChat(ClientHandler sender, String content) {
+        if (sender == null || sender.getPlayerInfo() == null) return;
+        broadcast(Protocol.CMD_CHAT_MSG + Protocol.DELIMITER
+                + sender.getPlayerInfo().getUsername() + Protocol.DELIMITER
+                + content);
     }
 
     private void finishGame(String reason) {
         if (isFinished) return;
         isFinished = true;
+        cancelTurnTimer();
 
         String redUser = playerRed.getPlayerInfo().getUsername();
         String blueUser = playerBlue.getPlayerInfo().getUsername();
         String winner = engine.getWinner(redUser, blueUser);
 
         broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER + winner + Protocol.DELIMITER + reason);
-        saveResult(winner);
+        saveResult(winner, reason);
     }
 
-    private void saveResult(String winner) {
+    private void saveResult(String winner, String reason) {
         if (playerRed != null && playerBlue != null) {
             String redUser = playerRed.getPlayerInfo().getUsername();
             String blueUser = playerBlue.getPlayerInfo().getUsername();
-            boolean ok = MatchDAO.saveMatchResult(redUser, blueUser, engine.getScoreRed(), engine.getScoreBlue(), winner);
+            boolean ok = MatchDAO.saveMatchResult(redUser, blueUser, engine.getScoreRed(), engine.getScoreBlue(), winner, reason);
             if (ok) {
                 UserDAO.refreshPlayerInfo(playerRed.getPlayerInfo());
                 UserDAO.refreshPlayerInfo(playerBlue.getPlayerInfo());
@@ -160,7 +248,9 @@ public class GameRoom {
         engine.reset();
         isFinished = false;
         currentTurn = Protocol.COLOR_RED;
-        broadcast(Protocol.CMD_CHANGE_TURN + Protocol.DELIMITER + currentTurn + Protocol.DELIMITER + "30");
+        timeoutsRed = 0;
+        timeoutsBlue = 0;
+        announceTurn();
     }
 
     public void broadcast(String message) {

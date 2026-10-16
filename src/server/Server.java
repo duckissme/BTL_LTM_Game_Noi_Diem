@@ -14,7 +14,10 @@ public class Server {
 
     public static void main(String[] args) {
         System.out.println("Tầng Network: Server đang khởi chạy trên cổng " + PORT + "...");
-        
+
+        // Thêm cột lưu người thắng / lý do kết thúc nếu CSDL được tạo từ file SQL cũ
+        database.MatchDAO.ensureSchema();
+
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             while (true) {
                 Socket clientSocket = serverSocket.accept();

@@ -70,11 +70,21 @@ public class Protocol {
     /** S -> C:  CAPTURE_BOX;hàng;cột;màu;điểm_đỏ;điểm_xanh */
     public static final String CMD_CAPTURE_BOX = "CAPTURE_BOX";
 
-    /** S -> C:  CHANGE_TURN;màu_lượt_tiếp;thời_gian_còn_lại (mặc định 30s) */
+    /** S -> C:  CHANGE_TURN;màu_lượt_tiếp;thời_gian_còn_lại (mặc định TURN_TIME_SECONDS) */
     public static final String CMD_CHANGE_TURN = "CHANGE_TURN";
 
-    /** S -> C:  TURN_TIMEOUT;màu_người_hết_giờ */
+    /**
+     * S -> C:  TURN_TIMEOUT;màu_người_hết_giờ;số_lần_hết_giờ_liên_tiếp
+     * Server tự đếm giờ mỗi lượt; hết giờ thì gửi gói này, ngay sau đó là CHANGE_TURN cho người kia.
+     * Lần thứ MAX_CONSECUTIVE_TIMEOUTS liên tiếp thì gửi GAME_OVER (lý do TIMEOUT) thay cho CHANGE_TURN.
+     */
     public static final String CMD_TURN_TIMEOUT = "TURN_TIMEOUT";
+
+    /** Thời gian tối đa cho mỗi lượt đi (giây) */
+    public static final int TURN_TIME_SECONDS = 30;
+
+    /** Hết giờ bấy nhiêu lần liên tiếp thì bị xử thua (đi được 1 nước là đếm lại từ 0) */
+    public static final int MAX_CONSECUTIVE_TIMEOUTS = 3;
 
     /** C -> S:  SURRENDER (xin hàng / đầu hàng) */
     public static final String CMD_SURRENDER = "SURRENDER";
@@ -82,7 +92,7 @@ public class Protocol {
     /** C -> S:  LEAVE_ROOM (thoát ván về sảnh) */
     public static final String CMD_LEAVE_ROOM = "LEAVE_ROOM";
 
-    /** S -> C:  GAME_OVER;người_thắng;lý_do (lý do: FULL_BOARD, SURRENDER, DISCONNECT...) */
+    /** S -> C:  GAME_OVER;người_thắng;lý_do (lý do: FULL_BOARD, SURRENDER, TIMEOUT) */
     public static final String CMD_GAME_OVER = "GAME_OVER";
 
     // =====================================================================
@@ -102,11 +112,50 @@ public class Protocol {
     // 6. CHAT TRONG PHÒNG
     // =====================================================================
 
-    /** C -> S:  CHAT;nội_dung */
+    /** C -> S:  CHAT;nội_dung (nội dung có thể chứa dấu ';') */
     public static final String CMD_CHAT = "CHAT";
 
-    /** S -> C:  CHAT_MSG;người_gửi;nội_dung */
+    /** S -> C:  CHAT_MSG;người_gửi;nội_dung (gửi cho cả 2 người trong phòng, kể cả người gửi) */
     public static final String CMD_CHAT_MSG = "CHAT_MSG";
+
+    /** Độ dài tối đa của 1 tin nhắn chat (Server tự cắt nếu dài hơn) */
+    public static final int CHAT_MAX_LENGTH = 200;
+
+    // =====================================================================
+    // 7. LỊCH SỬ TRẬN ĐẤU
+    // =====================================================================
+
+    /**
+     * C -> S:  GET_HISTORY;tên_người_chơi  (xem lịch sử của bất kỳ người chơi nào)
+     *          GET_HISTORY                 (bỏ trống tên = xem của chính mình)
+     */
+    public static final String CMD_GET_HISTORY = "GET_HISTORY";
+
+    /**
+     * S -> C:  HISTORY;tên_người_chơi;tổng,thắng,thua;trận|trận|...
+     * Mọi số liệu tính theo góc nhìn của tên_người_chơi. Danh sách xếp mới nhất trước,
+     * tối đa HISTORY_LIMIT trận (phần tổng kết tính trên TẤT CẢ các trận).
+     * Mỗi trận: đối_thủ,màu_quân,điểm_mình,điểm_đối_thủ,kết_quả,lý_do,thời_điểm
+     *   - kết_quả:   WIN / LOSE / UNKNOWN (trận cũ chưa lưu người thắng và kết thúc sớm)
+     *   - lý_do:     FULL_BOARD / SURRENDER / TIMEOUT (để trống với trận cũ chưa lưu lý do)
+     *   - thời_điểm: số mili-giây tính từ 01/01/1970 (epoch millis)
+     * Không có kết quả hòa: bàn cờ có 25 ô (số lẻ) nên luôn có người thắng.
+     */
+    public static final String CMD_HISTORY = "HISTORY";
+    /** S -> C:  HISTORY_FAIL;lý_do (người chơi không tồn tại hoặc lỗi cơ sở dữ liệu) */
+    public static final String CMD_HISTORY_FAIL = "HISTORY_FAIL";
+
+    public static final String RESULT_WIN = "WIN";
+    public static final String RESULT_LOSE = "LOSE";
+    public static final String RESULT_UNKNOWN = "UNKNOWN";
+
+    public static final String REASON_FULL_BOARD = "FULL_BOARD";
+    public static final String REASON_SURRENDER = "SURRENDER";
+    /** Hết giờ MAX_CONSECUTIVE_TIMEOUTS lượt liên tiếp */
+    public static final String REASON_TIMEOUT = "TIMEOUT";
+
+    /** Số trận gần nhất tối đa gửi về trong HISTORY */
+    public static final int HISTORY_LIMIT = 50;
 
     // =====================================================================
     // HẰNG SỐ MÀU QUÂN & NÉT VẼ

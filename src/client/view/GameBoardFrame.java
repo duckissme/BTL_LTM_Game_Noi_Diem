@@ -26,6 +26,7 @@ import java.awt.geom.RoundRectangle2D;
  *  1. Tầng trên (Top Bar): Thông tin 2 người chơi (Đỏ/Xanh), ô chiếm được và Tỉ số.
  *  2. Tầng giữa (Game Board): Bàn cờ 5x5 ô (6x6 dấu chấm = 36 chấm), nhận click gửi MOVE,
  *     nhận DRAW_LINE / CAPTURE_BOX từ Server để vẽ lại.
+ *     Bên phải là khung chat (ChatPanel): gửi CHAT, chỉ hiển thị tin khi nhận CHAT_MSG từ Server.
  *  3. Tầng dưới (Bottom Bar): Hiển thị lượt hiện tại, đồng hồ đếm ngược 30s và nút "Thoát".
  */
 public class GameBoardFrame extends JFrame implements MessageListener {
@@ -46,10 +47,10 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     // Màu phe Đỏ và Xanh
     public static final Color COLOR_RED_VAL = new Color(239, 68, 68);       // Đỏ tươi
     public static final Color COLOR_BLUE_VAL = new Color(37, 99, 235);      // Xanh dương tươi
-    private static final Color COLOR_RED_BG = new Color(254, 242, 242);     // Đỏ nhạt cho box điểm
-    private static final Color COLOR_RED_BORDER = new Color(252, 165, 165);
-    private static final Color COLOR_BLUE_BG = new Color(239, 246, 255);    // Xanh nhạt cho box điểm
-    private static final Color COLOR_BLUE_BORDER = new Color(191, 219, 254);
+    static final Color COLOR_RED_BG = new Color(254, 242, 242);     // Đỏ nhạt cho box điểm & bong bóng chat
+    static final Color COLOR_RED_BORDER = new Color(252, 165, 165);
+    static final Color COLOR_BLUE_BG = new Color(239, 246, 255);    // Xanh nhạt cho box điểm & bong bóng chat
+    static final Color COLOR_BLUE_BORDER = new Color(191, 219, 254);
 
     private static final Color DOT_COLOR = new Color(30, 41, 59);           // Màu chấm tròn (Slate-800)
     private static final Color GRID_LINE_COLOR = new Color(203, 213, 225);  // Cạnh chưa vẽ
@@ -84,13 +85,24 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     private JLabel lblTurnIndicator;
     private JLabel lblTimerText;
     private Timer turnCountdownTimer;
-    private int remainingSeconds = 30;
+    private int remainingSeconds = Protocol.TURN_TIME_SECONDS;
 
     // Thành phần bàn cờ trung tâm
     private GameBoardPanel boardPanel;
 
     // Cạnh đang được rê chuột (hover): [type: "H"/"V", r, c]
     private HoverEdge hoveredEdge = null;
+
+    // Khung chat trong trận (bên phải bàn cờ)
+    private ChatPanel chatPanel;
+
+    // Thông báo nổi phía trên bàn cờ, tự ẩn sau TOAST_MS (vd: hết giờ).
+    // Không dùng hộp thoại vì hộp thoại chặn màn hình trong khi đồng hồ lượt vẫn chạy.
+    private static final int TOAST_MS = 3000;
+    private static final Color TOAST_WARN = new Color(234, 88, 12);   // Cam: mình bị mất lượt
+    private String toastText = null;
+    private Color toastColor = PRIMARY;
+    private Timer toastTimer;
 
     // Hộp thoại kết thúc trận đấu và điều khiển tái đấu
     private JDialog gameOverDialog = null;
@@ -117,7 +129,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         }
 
         initUI();
-        startTurnTimer(30);
+        startTurnTimer(Protocol.TURN_TIME_SECONDS);
 
         // Đăng ký nhận gói tin trực tiếp từ SocketClient
         try {
@@ -132,8 +144,8 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     private void initUI() {
         setTitle("Dots and Boxes Game");
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        setSize(840, 720);
-        setMinimumSize(new Dimension(760, 660));
+        setSize(840 + ChatPanel.PANEL_WIDTH, 720);
+        setMinimumSize(new Dimension(760 + ChatPanel.PANEL_WIDTH, 660));
         setLocationRelativeTo(null);
 
         addWindowListener(new WindowAdapter() {
@@ -149,9 +161,15 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         // TẦNG 1: TOP BAR (Thông tin 2 người chơi & Tỉ số)
         root.add(createTopBar(), BorderLayout.NORTH);
 
-        // TẦNG 2: MIDDLE AREA (Bàn cờ trung tâm 5x5 ô)
+        // TẦNG 2: MIDDLE AREA (Bàn cờ trung tâm 5x5 ô + Khung chat bên phải)
         boardPanel = new GameBoardPanel();
-        root.add(boardPanel, BorderLayout.CENTER);
+        JPanel middle = new JPanel(new BorderLayout());
+        middle.setOpaque(false);
+        middle.add(boardPanel, BorderLayout.CENTER);
+        chatPanel = new ChatPanel(currentUser, Protocol.COLOR_RED.equalsIgnoreCase(myColor), this::sendChat);
+        chatPanel.addSystemMessage("Ván đấu bắt đầu. Chúc hai bạn chơi vui vẻ!");
+        middle.add(chatPanel, BorderLayout.EAST);
+        root.add(middle, BorderLayout.CENTER);
 
         // TẦNG 3: BOTTOM BAR (Lượt đi, Timer 30s, Nút Thoát)
         root.add(createBottomBar(), BorderLayout.SOUTH);
@@ -445,6 +463,23 @@ public class GameBoardFrame extends JFrame implements MessageListener {
             int lblY = y0 + (DOT_ROWS - 1) * SPACING + 38;
             g2.drawString(label, lblX, lblY);
 
+            // 7. THÔNG BÁO NỔI (viên thuốc phía trên bàn cờ)
+            if (toastText != null) {
+                g2.setFont(new Font(AppUI.FONT, Font.BOLD, 14));
+                FontMetrics tfm = g2.getFontMetrics();
+                int th = 38;
+                int tw = tfm.stringWidth(toastText) + 40;
+                int tx = (getWidth() - tw) / 2;
+                int ty = Math.max(8, y0 - th - 22);
+                RoundRectangle2D pill = new RoundRectangle2D.Float(tx, ty, tw, th, th, th);
+                g2.setColor(new Color(15, 23, 42, 40)); // Bóng mờ
+                g2.fill(new RoundRectangle2D.Float(tx, ty + 3, tw, th, th, th));
+                g2.setColor(toastColor);
+                g2.fill(pill);
+                g2.setColor(Color.WHITE);
+                g2.drawString(toastText, tx + 20, ty + (th - tfm.getHeight()) / 2 + tfm.getAscent());
+            }
+
             g2.dispose();
         }
 
@@ -551,6 +586,24 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     }
 
     // =========================================================================
+    // 2b. KHUNG CHAT TRONG TRẬN (bên phải bàn cờ)
+    // =========================================================================
+
+    /**
+     * Gửi CHAT lên Server (ChatPanel gọi khi người dùng bấm Gửi).
+     * Không tự hiển thị tin của mình: Server sẽ gửi lại CHAT_MSG cho cả 2 người (Dumb View).
+     *
+     * @return true nếu đã gửi được
+     */
+    private boolean sendChat(String text) {
+        if (!SocketClient.getInstance().send(Protocol.CMD_CHAT + Protocol.DELIMITER + text)) {
+            AppUI.showConnectionError(this);
+            return false;
+        }
+        return true;
+    }
+
+    // =========================================================================
     // 3. TẦNG DƯỚI (BOTTOM BAR - TURN & CONTROL)
     // =========================================================================
 
@@ -608,7 +661,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         timerPill.setBorder(new EmptyBorder(2, 16, 2, 16));
 
         JLabel iconClock = new JLabel(new ClockVectorIcon(18, PRIMARY));
-        lblTimerText = new JLabel("30s");
+        lblTimerText = new JLabel(Protocol.TURN_TIME_SECONDS + "s");
         lblTimerText.setFont(new Font(AppUI.FONT, Font.BOLD, 15));
         lblTimerText.setForeground(TEXT_MAIN);
 
@@ -783,18 +836,27 @@ public class GameBoardFrame extends JFrame implements MessageListener {
                 // S -> C: CHANGE_TURN;next_color;remaining_time
                 if (parts.length >= 2) {
                     String nextColor = parts[1];
-                    int time = (parts.length >= 3) ? Integer.parseInt(parts[2]) : 30;
+                    int time = (parts.length >= 3) ? Integer.parseInt(parts[2]) : Protocol.TURN_TIME_SECONDS;
                     handleChangeTurn(nextColor, time);
                 }
                 break;
 
             case Protocol.CMD_TURN_TIMEOUT:
-                // S -> C: TURN_TIMEOUT;loser_color
+                // S -> C: TURN_TIMEOUT;loser_color;số_lần_liên_tiếp
+                // (sau đó Server gửi CHANGE_TURN, hoặc GAME_OVER nếu đã hết giờ quá số lần cho phép)
                 if (parts.length >= 2) {
-                    String loserColor = parts[1];
-                    boolean isMe = loserColor.equalsIgnoreCase(myColor);
-                    String msg = isMe ? "Bạn đã hết thời gian 30s! Mất lượt đi." : "Đối thủ đã hết thời gian 30s!";
-                    JOptionPane.showMessageDialog(this, msg, "Hết giờ", JOptionPane.INFORMATION_MESSAGE);
+                    boolean isMe = parts[1].equalsIgnoreCase(myColor);
+                    int count = (parts.length >= 3) ? Integer.parseInt(parts[2]) : 1;
+                    String times = " (" + count + "/" + Protocol.MAX_CONSECUTIVE_TIMEOUTS + ")";
+                    if (isMe) {
+                        boolean lastChance = count == Protocol.MAX_CONSECUTIVE_TIMEOUTS - 1;
+                        showToast("Bạn đã hết giờ" + times + (lastChance
+                                ? " – thêm 1 lần nữa sẽ bị xử thua!"
+                                : ", mất lượt!"), TOAST_WARN);
+                    } else {
+                        showToast(opponentUser + " đã hết giờ" + times + ", tới lượt bạn!", PRIMARY);
+                    }
+                    Toolkit.getDefaultToolkit().beep();
                 }
                 break;
 
@@ -847,11 +909,11 @@ public class GameBoardFrame extends JFrame implements MessageListener {
                 break;
 
             case Protocol.CMD_CHAT_MSG:
-                // Hiển thị tin nhắn nếu có
-                if (parts.length >= 3) {
-                    String from = parts[1];
-                    String text = parts[2];
-                    JOptionPane.showMessageDialog(this, from + ": " + text, "Tin nhắn phòng", JOptionPane.PLAIN_MESSAGE);
+                // S -> C: CHAT_MSG;người_gửi;nội_dung
+                // Tách tối đa 3 phần vì nội dung có thể chứa dấu ';'
+                String[] chatParts = message.split(Protocol.DELIMITER, 3);
+                if (chatParts.length >= 3) {
+                    chatPanel.addMessage(chatParts[1], chatParts[2]);
                 }
                 break;
         }
@@ -868,6 +930,24 @@ public class GameBoardFrame extends JFrame implements MessageListener {
             lobbyFrame.dispose();
         }
         new LoginFrame().setVisible(true);
+    }
+
+    /**
+     * Hiện thông báo nổi phía trên bàn cờ, tự ẩn sau TOAST_MS mili-giây.
+     */
+    private void showToast(String text, Color color) {
+        toastText = text;
+        toastColor = color;
+        if (toastTimer != null) {
+            toastTimer.stop();
+        }
+        toastTimer = new Timer(TOAST_MS, e -> {
+            toastText = null;
+            boardPanel.repaint();
+        });
+        toastTimer.setRepeats(false);
+        toastTimer.start();
+        boardPanel.repaint();
     }
 
     private void handleDrawLine(String type, int r, int c, String color) {
@@ -933,6 +1013,9 @@ public class GameBoardFrame extends JFrame implements MessageListener {
             reasonDesc = isWin ? "Đối thủ đã xin hàng/thoát trận." : "Bạn đã xin hàng/thoát trận.";
         } else if ("DISCONNECT".equalsIgnoreCase(reason)) {
             reasonDesc = isWin ? "Đối thủ đã mất kết nối." : "Bạn đã mất kết nối.";
+        } else if (Protocol.REASON_TIMEOUT.equalsIgnoreCase(reason)) {
+            reasonDesc = (isWin ? "Đối thủ" : "Bạn") + " đã hết giờ "
+                    + Protocol.MAX_CONSECUTIVE_TIMEOUTS + " lượt liên tiếp.";
         }
 
         // Tạo Dialog hiện đại đồng bộ giao diện
@@ -1108,8 +1191,9 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         lblMatchScore.setText("Tỉ số: 0 - 0");
         this.currentTurn = Protocol.COLOR_RED;
         updateTurnDisplay();
-        startTurnTimer(30);
+        startTurnTimer(Protocol.TURN_TIME_SECONDS);
         boardPanel.repaint();
+        chatPanel.addSystemMessage("— Ván mới bắt đầu —");
     }
 
     // =========================================================================

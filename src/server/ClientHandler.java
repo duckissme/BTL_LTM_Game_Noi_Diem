@@ -1,6 +1,7 @@
 package server;
 
 import common.Protocol;
+import database.MatchDAO;
 import database.UserDAO;
 import entity.Player;
 import common.PlayerStatus;
@@ -73,6 +74,12 @@ public class ClientHandler extends Thread {
                                 room.handleMove(this, parts[1], Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
                             }
                         }
+                        break;
+                    case Protocol.CMD_CHAT:
+                        handleChat(message);
+                        break;
+                    case Protocol.CMD_GET_HISTORY:
+                        handleGetHistory(parts);
                         break;
                     case Protocol.CMD_SURRENDER:
                     case Protocol.CMD_LEAVE_ROOM:
@@ -274,6 +281,51 @@ public class ClientHandler extends Thread {
             RoomManager.removeRoom(room.getRoomId());
             this.playerInfo.setStatus(PlayerStatus.FREE);
             Server.broadcastLobbyData();
+        }
+    }
+
+    private void handleChat(String message) {
+        if (playerInfo == null) return;
+
+        // Lấy nguyên phần sau "CHAT;" thay vì parts[1] vì nội dung có thể chứa dấu ';'
+        int idx = message.indexOf(Protocol.DELIMITER);
+        if (idx < 0) return;
+        String content = message.substring(idx + 1).trim();
+        if (content.isEmpty()) return;
+        if (content.length() > Protocol.CHAT_MAX_LENGTH) {
+            int cut = Protocol.CHAT_MAX_LENGTH;
+            // Emoji chiếm 2 char (cặp surrogate): không cắt đôi một emoji
+            if (Character.isHighSurrogate(content.charAt(cut - 1))) {
+                cut--;
+            }
+            content = content.substring(0, cut);
+        }
+
+        // Chỉ chat được khi đang ở trong phòng đấu
+        GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
+        if (room != null) {
+            room.handleChat(this, content);
+        }
+    }
+
+    private void handleGetHistory(String[] parts) {
+        if (playerInfo == null) return; // Phải đăng nhập mới xem được lịch sử
+
+        // Không gửi kèm tên thì xem lịch sử của chính mình
+        String target = (parts.length >= 2 && !parts[1].trim().isEmpty())
+                ? parts[1].trim()
+                : playerInfo.getUsername();
+
+        if (UserDAO.getUserByUsername(target) == null) {
+            sendMessage(Protocol.CMD_HISTORY_FAIL + Protocol.DELIMITER + "Không tìm thấy người chơi [" + target + "]!");
+            return;
+        }
+
+        String data = MatchDAO.getHistory(target);
+        if (data == null) {
+            sendMessage(Protocol.CMD_HISTORY_FAIL + Protocol.DELIMITER + "Không tải được lịch sử trận đấu!");
+        } else {
+            sendMessage(Protocol.CMD_HISTORY + Protocol.DELIMITER + target + Protocol.DELIMITER + data);
         }
     }
 

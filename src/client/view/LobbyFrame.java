@@ -42,6 +42,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
     private JDialog waitingDialog;
     private Timer spinnerTimer;
     private JDialog inviteDialog = null;
+    private MatchHistoryDialog historyDialog = null;
 
     // Bảng màu (dùng chung tông với màn hình Đăng nhập / Đăng ký)
     private static final Color PRIMARY = AppUI.PRIMARY;
@@ -170,6 +171,11 @@ public class LobbyFrame extends JFrame implements MessageListener {
         lblHeaderWins = new JLabel(String.valueOf(currentWins));
         JLabel lblHeaderUser = new JLabel(currentUser);
 
+        // Nút mở Lịch sử trận đấu của chính mình (hộp thoại mở khi Server trả về HISTORY)
+        HeaderPillButton btnHistory = new HeaderPillButton("Lịch sử đấu", new HistoryVectorIcon(18, Color.WHITE));
+        btnHistory.addActionListener(e -> requestHistory(currentUser));
+        pnlProfile.add(btnHistory, gbc);
+
         pnlProfile.add(createHeaderChip(new StarVectorIcon(20, new Color(252, 211, 77)),
                 "ĐIỂM", lblHeaderPoints), gbc);
         pnlProfile.add(createHeaderChip(new TrophyVectorIcon(20, Color.WHITE),
@@ -262,7 +268,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
         card.add(createCardHeader(
                 new TileIcon(40, new PeopleVectorIcon(20, Color.WHITE), PRIMARY, new Color(14, 165, 233)),
                 "Danh sách Online",
-                "Chọn một đối thủ đang rỗi để thách đấu",
+                "Thách đấu người đang rỗi  •  Nhấp đúp để xem lịch sử đấu",
                 lblOnlineBadge), BorderLayout.NORTH);
 
         // Bảng dữ liệu
@@ -292,6 +298,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
         // Renderer & Editor nút Thách Đấu
         tblOnline.getColumnModel().getColumn(4).setCellRenderer(new ChallengeButtonRenderer());
         tblOnline.getColumnModel().getColumn(4).setCellEditor(new ChallengeButtonEditor(tblOnline, currentUser));
+        installHistoryOnDoubleClick(tblOnline, 0, 4);
 
         card.add(createTableScroll(tblOnline), BorderLayout.CENTER);
         return card;
@@ -309,7 +316,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
         card.add(createCardHeader(
                 new TileIcon(40, new TrophyVectorIcon(20, Color.WHITE), new Color(245, 158, 11), new Color(234, 88, 12)),
                 "Bảng xếp hạng",
-                "Những cao thủ có điểm số cao nhất",
+                "Cao thủ điểm cao nhất  •  Nhấp đúp để xem lịch sử đấu",
                 lblSys), BorderLayout.NORTH);
 
         String[] columns = {"Hạng", "Tên người chơi", "Điểm", "Số trận"};
@@ -332,6 +339,7 @@ public class LobbyFrame extends JFrame implements MessageListener {
         tblLeaderboard.getColumnModel().getColumn(0).setCellRenderer(new RankBadgeRenderer());
         tblLeaderboard.getColumnModel().getColumn(1).setCellRenderer(new PlayerCellRenderer());
         tblLeaderboard.getColumnModel().getColumn(2).setCellRenderer(new TextCellRenderer(true, PRIMARY));
+        installHistoryOnDoubleClick(tblLeaderboard, 1, -1);
 
         card.add(createTableScroll(tblLeaderboard), BorderLayout.CENTER);
         return card;
@@ -764,9 +772,22 @@ public class LobbyFrame extends JFrame implements MessageListener {
             if (parts.length >= 3 && Protocol.RESP_REJECT.equals(parts[2])) {
                 JOptionPane.showMessageDialog(this, "Người chơi [" + parts[1] + "] đã từ chối thách đấu!", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
             }
+        } else if (Protocol.CMD_HISTORY.equals(cmd)) {
+            // HISTORY;tên;tổng_kết;danh_sách — tách tối đa 4 phần, danh sách có thể trống
+            String[] h = message.split(Protocol.DELIMITER, 4);
+            String viewedUser = h.length > 1 ? h[1] : currentUser;
+            closeHistoryDialog();
+            historyDialog = new MatchHistoryDialog(this, viewedUser, viewedUser.equalsIgnoreCase(currentUser),
+                    h.length > 2 ? h[2] : "", h.length > 3 ? h[3] : "", this::requestHistory);
+            historyDialog.setVisible(true);
+        } else if (Protocol.CMD_HISTORY_FAIL.equals(cmd)) {
+            JOptionPane.showMessageDialog(historyDialog != null ? historyDialog : this,
+                    parts.length > 1 ? parts[1] : "Không tải được lịch sử trận đấu!",
+                    "Lỗi", JOptionPane.ERROR_MESSAGE);
         } else if (Protocol.CMD_START_GAME.equals(cmd)) {
             closeWaitingDialog();
             closeChallengeInviteDialog();
+            closeHistoryDialog();
             String opponent = parts.length > 1 ? parts[1] : "Đối thủ";
             String myColor = parts.length > 2 ? parts[2] : Protocol.COLOR_RED;
             String startingTurn = parts.length > 3 ? parts[3] : Protocol.COLOR_RED;
@@ -931,6 +952,40 @@ public class LobbyFrame extends JFrame implements MessageListener {
         inviteDialog.setVisible(true);
     }
 
+    /**
+     * Gửi GET_HISTORY;tên lên Server. Hộp thoại chỉ mở khi Server trả về HISTORY.
+     */
+    private void requestHistory(String username) {
+        if (!SocketClient.getInstance().send(Protocol.CMD_GET_HISTORY + Protocol.DELIMITER + username)) {
+            AppUI.showConnectionError(historyDialog != null ? historyDialog : this);
+        }
+    }
+
+    /**
+     * Nhấp đúp vào một người chơi trong bảng để xem lịch sử đấu của người đó.
+     *
+     * @param skipColumn cột không xử lý nhấp đúp (cột nút Thách đấu), -1 nếu không có
+     */
+    private void installHistoryOnDoubleClick(JTable table, int nameColumn, int skipColumn) {
+        table.setToolTipText("Nhấp đúp để xem lịch sử đấu của người chơi");
+        table.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() != 2 || !SwingUtilities.isLeftMouseButton(e)) return;
+                int row = table.rowAtPoint(e.getPoint());
+                if (row < 0 || table.columnAtPoint(e.getPoint()) == skipColumn) return;
+                requestHistory(String.valueOf(table.getValueAt(row, nameColumn)));
+            }
+        });
+    }
+
+    private void closeHistoryDialog() {
+        if (historyDialog != null) {
+            historyDialog.dispose();
+            historyDialog = null;
+        }
+    }
+
     public void closeChallengeInviteDialog() {
         if (inviteDialog != null) {
             inviteDialog.setVisible(false);
@@ -1059,6 +1114,84 @@ public class LobbyFrame extends JFrame implements MessageListener {
             g2.drawString(getText(), (w - fm.stringWidth(getText())) / 2, (h - fm.getHeight()) / 2 + fm.getAscent());
             g2.dispose();
         }
+    }
+
+    /**
+     * Nút trên header gradient: nền trắng trong suốt giống các chip thông tin, sáng hơn khi rê chuột
+     */
+    private static class HeaderPillButton extends JButton {
+        HeaderPillButton(String text, Icon icon) {
+            super(text, icon);
+            setContentAreaFilled(false);
+            setBorderPainted(false);
+            setFocusPainted(false);
+            setOpaque(false);
+            setForeground(Color.WHITE);
+            setFont(new Font(FONT, Font.BOLD, 13));
+            setIconTextGap(8);
+            setBorder(new EmptyBorder(12, 16, 12, 18));
+            setCursor(new Cursor(Cursor.HAND_CURSOR));
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            RoundRectangle2D shape = new RoundRectangle2D.Float(0, 0, getWidth() - 1, getHeight() - 1, 16, 16);
+            int alpha = getModel().isPressed() ? 80 : (getModel().isRollover() ? 62 : 38);
+            g2.setColor(new Color(255, 255, 255, alpha));
+            g2.fill(shape);
+            g2.setColor(new Color(255, 255, 255, 90));
+            g2.draw(shape);
+            g2.dispose();
+            super.paintComponent(g);
+        }
+    }
+
+    /**
+     * Icon Lịch sử vector: đồng hồ với mũi tên quay ngược
+     */
+    private static class HistoryVectorIcon implements Icon {
+        private final int size;
+        private final Color color;
+
+        HistoryVectorIcon(int size, Color color) {
+            this.size = size;
+            this.color = color;
+        }
+
+        @Override
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(color);
+            g2.setStroke(new BasicStroke(size * 0.1f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+
+            double pad = size * 0.12;
+            double d = size - pad * 2;
+            // Vòng tròn hở một đoạn ở góc trên bên trái
+            g2.draw(new Arc2D.Double(x + pad, y + pad, d, d, 150, -300, Arc2D.OPEN));
+
+            // Mũi tên ở đầu cung (vị trí 150 độ)
+            double cx = x + size / 2.0;
+            double cy = y + size / 2.0;
+            double r = d / 2;
+            double ax = cx + r * Math.cos(Math.toRadians(150));
+            double ay = cy - r * Math.sin(Math.toRadians(150));
+            Path2D arrow = new Path2D.Double();
+            arrow.moveTo(ax - size * 0.2, ay - size * 0.02);
+            arrow.lineTo(ax, ay);
+            arrow.lineTo(ax + size * 0.04, ay - size * 0.2);
+            g2.draw(arrow);
+
+            // Kim đồng hồ
+            g2.draw(new Line2D.Double(cx, cy, cx, cy - r * 0.55));
+            g2.draw(new Line2D.Double(cx, cy, cx + r * 0.42, cy + r * 0.28));
+            g2.dispose();
+        }
+
+        @Override public int getIconWidth() { return size; }
+        @Override public int getIconHeight() { return size; }
     }
 
     /**
