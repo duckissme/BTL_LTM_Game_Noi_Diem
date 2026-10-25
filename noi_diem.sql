@@ -16,8 +16,8 @@ CREATE TABLE users (
 );
 
 -- Bảng matches
--- winner_id: người thắng (bàn cờ 25 ô nên không có hòa)
--- end_reason: FULL_BOARD (hết bàn cờ) / SURRENDER (bỏ cuộc) / TIMEOUT (hết giờ 3 lượt liên tiếp)
+-- winner_id: người thắng (NULL khi hòa: hết giờ trận mà số ô bằng nhau)
+-- end_reason: FULL_BOARD (hết bàn cờ) / SURRENDER (bỏ cuộc) / TIMEOUT (hết giờ 3 lượt liên tiếp) / TIME_UP (hết 4 phút của trận)
 CREATE TABLE matches (
     match_id INT AUTO_INCREMENT PRIMARY KEY,
     player_red_id INT,

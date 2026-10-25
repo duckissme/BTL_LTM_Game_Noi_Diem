@@ -16,6 +16,10 @@ import java.sql.Types;
  */
 public class MatchDAO {
 
+    public static final int POINTS_WIN = 10;
+    public static final int POINTS_LOSE = -10;
+    public static final int POINTS_DRAW = 5;
+
     /**
      * Lưu kết quả trận đấu vào bảng 'matches' và cập nhật điểm/trận cho 2 người chơi.
      * 
@@ -34,8 +38,8 @@ public class MatchDAO {
     }
 
     /**
-     * @param winner    Tên người thắng (tên không khớp 2 người chơi thì winner_id để NULL)
-     * @param endReason Lý do kết thúc: Protocol.REASON_FULL_BOARD / REASON_SURRENDER (có thể null)
+     * @param winner    Tên người thắng, Protocol.WINNER_DRAW nếu hòa (tên không khớp 2 người chơi thì winner_id để NULL)
+     * @param endReason Lý do kết thúc: Protocol.REASON_FULL_BOARD / REASON_SURRENDER / REASON_TIMEOUT / REASON_TIME_UP (có thể null)
      */
     public static boolean saveMatchResult(String redUser, String blueUser, int redScore, int blueScore,
                                           String winner, String endReason) {
@@ -75,7 +79,7 @@ public class MatchDAO {
                 pstmt.setInt(2, blueId);
                 pstmt.setInt(3, redScore);
                 pstmt.setInt(4, blueScore);
-                // winner_id = NULL: không xác định được người thắng (bình thường không xảy ra)
+                // winner_id = NULL: hòa, hoặc không xác định được người thắng
                 if (winner != null && winner.equalsIgnoreCase(redUser)) {
                     pstmt.setInt(5, redId);
                 } else if (winner != null && winner.equalsIgnoreCase(blueUser)) {
@@ -87,23 +91,22 @@ public class MatchDAO {
                 pstmt.executeUpdate();
             }
 
-            // 3. Tính điểm cộng (Thắng +50, Thua +10, Hòa +20)
+            // 3. Tính điểm cộng (Thắng +10, Thua -10, Hòa +5)
+            // Không truyền tên người thắng thì suy ra từ số ô chiếm được
+            if (winner == null || winner.isEmpty()) {
+                winner = redScore > blueScore ? redUser : (blueScore > redScore ? blueUser : Protocol.WINNER_DRAW);
+            }
             int redPoints;
             int bluePoints;
-            if (winner != null && !winner.isEmpty()) {
-                if (winner.equalsIgnoreCase(redUser)) {
-                    redPoints = 50;
-                    bluePoints = 10;
-                } else if (winner.equalsIgnoreCase(blueUser)) {
-                    redPoints = 10;
-                    bluePoints = 50;
-                } else {
-                    redPoints = 20;
-                    bluePoints = 20;
-                }
+            if (winner.equalsIgnoreCase(redUser)) {
+                redPoints = POINTS_WIN;
+                bluePoints = POINTS_LOSE;
+            } else if (winner.equalsIgnoreCase(blueUser)) {
+                redPoints = POINTS_LOSE;
+                bluePoints = POINTS_WIN;
             } else {
-                redPoints = redScore > blueScore ? 50 : (redScore == blueScore ? 20 : 10);
-                bluePoints = blueScore > redScore ? 50 : (redScore == blueScore ? 20 : 10);
+                redPoints = POINTS_DRAW;
+                bluePoints = POINTS_DRAW;
             }
 
             try (PreparedStatement pstmt = conn.prepareStatement(updateUserQuery)) {
@@ -153,7 +156,7 @@ public class MatchDAO {
 
     /**
      * Lấy lịch sử trận đấu của một người chơi theo định dạng gói tin HISTORY (xem Protocol.CMD_HISTORY):
-     * "tổng,thắng,thua;trận|trận|..." (mới nhất trước, tối đa Protocol.HISTORY_LIMIT trận).
+     * "tổng,thắng,thua,hòa;trận|trận|..." (mới nhất trước, tối đa Protocol.HISTORY_LIMIT trận).
      *
      * @return chuỗi dữ liệu, hoặc null nếu lỗi CSDL
      */
@@ -173,7 +176,7 @@ public class MatchDAO {
                 pstmt.setString(1, username);
                 pstmt.setString(2, username);
 
-                int total = 0, wins = 0, losses = 0;
+                int total = 0, wins = 0, losses = 0, draws = 0;
                 StringBuilder list = new StringBuilder();
                 try (ResultSet rs = pstmt.executeQuery()) {
                     while (rs.next()) {
@@ -189,6 +192,9 @@ public class MatchDAO {
                         if (!rs.wasNull()) {
                             int redId = rs.getInt("player_red_id");
                             result = (winnerId == redId) == iAmRed ? Protocol.RESULT_WIN : Protocol.RESULT_LOSE;
+                        } else if (Protocol.REASON_TIME_UP.equalsIgnoreCase(reason) && myScore == oppScore) {
+                            // Hết giờ trận mà số ô bằng nhau: hòa (không có người thắng)
+                            result = Protocol.RESULT_DRAW;
                         } else if (myScore + oppScore == GameEngine.TOTAL_BOXES) {
                             // Trận cũ chưa lưu người thắng nhưng đã chiếm hết bàn cờ:
                             // 25 ô là số lẻ nên tỉ số luôn chênh lệch -> suy ra chắc chắn từ tỉ số
@@ -201,6 +207,7 @@ public class MatchDAO {
                         total++;
                         if (Protocol.RESULT_WIN.equals(result)) wins++;
                         else if (Protocol.RESULT_LOSE.equals(result)) losses++;
+                        else if (Protocol.RESULT_DRAW.equals(result)) draws++;
 
                         if (total <= Protocol.HISTORY_LIMIT) {
                             Timestamp finishedAt = rs.getTimestamp("finished_at");
@@ -217,7 +224,7 @@ public class MatchDAO {
                 if (list.length() > 0) {
                     list.setLength(list.length() - 1); // Bỏ dấu '|' cuối
                 }
-                return total + "," + wins + "," + losses + Protocol.DELIMITER + list;
+                return total + "," + wins + "," + losses + "," + draws + Protocol.DELIMITER + list;
             }
         } catch (SQLException e) {
             System.err.println("[MatchDAO] Lỗi khi lấy lịch sử trận đấu: " + e.getMessage());
