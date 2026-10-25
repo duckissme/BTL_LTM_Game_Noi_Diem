@@ -150,6 +150,6 @@ public class GameEngine {
     public String getWinner(String redUsername, String blueUsername) {
         if (scoreRed > scoreBlue) return redUsername;
         if (scoreBlue > scoreRed) return blueUsername;
-        return "DRAW";
+        return Protocol.WINNER_DRAW;
     }
 }

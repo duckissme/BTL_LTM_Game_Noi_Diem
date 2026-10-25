@@ -76,10 +76,18 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     private int scoreRed = 0;
     private int scoreBlue = 0;
 
+    // Chuỗi trận giữa 2 người do Server gửi (MATCH_INFO / GAME_OVER): trận thứ mấy và số trận thắng mỗi bên
+    private int matchNumber = 1;
+    private int winsRed = 0;
+    private int winsBlue = 0;
+
     // Thành phần giao diện Top Bar
     private JLabel lblRedScore;
     private JLabel lblBlueScore;
     private JLabel lblMatchScore;
+    private JLabel lblMatchInfo;      // "Trận N • còn mm:ss"
+    private Timer matchCountdownTimer;
+    private int matchRemainingSeconds = Protocol.MATCH_TIME_SECONDS;
 
     // Thành phần giao diện Bottom Bar
     private JLabel lblTurnIndicator;
@@ -130,6 +138,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
 
         initUI();
         startTurnTimer(Protocol.TURN_TIME_SECONDS);
+        startMatchTimer(Protocol.MATCH_TIME_SECONDS);
 
         // Đăng ký nhận gói tin trực tiếp từ SocketClient
         try {
@@ -224,13 +233,23 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         pnlRed.add(pnlRedNames);
         pnlRed.add(boxRedScore);
 
-        // Ở GIỮA: Tỉ số trận đấu
+        // Ở GIỮA: Trận thứ mấy + thời gian còn lại của trận, bên dưới là tỉ số (số trận thắng Đỏ - Xanh)
         JPanel pnlCenter = new JPanel(new GridBagLayout());
         pnlCenter.setOpaque(false);
-        lblMatchScore = new JLabel("Tỉ số: 0 - 0", SwingConstants.CENTER);
+        lblMatchInfo = new JLabel(" ", SwingConstants.CENTER);
+        lblMatchInfo.setFont(new Font(AppUI.FONT, Font.BOLD, 13));
+        lblMatchInfo.setForeground(TEXT_MUTED);
+        lblMatchScore = new JLabel(" ", SwingConstants.CENTER);
         lblMatchScore.setFont(new Font(AppUI.FONT, Font.BOLD, 22));
         lblMatchScore.setForeground(TEXT_MAIN);
-        pnlCenter.add(lblMatchScore);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        pnlCenter.add(lblMatchInfo, gbc);
+        gbc.gridy = 1;
+        pnlCenter.add(lblMatchScore, gbc);
+        updateMatchInfoDisplay();
+        updateSeriesScoreDisplay();
 
         // BÊN PHẢI: Người chơi XANH
         JPanel pnlBlue = new JPanel(new FlowLayout(FlowLayout.RIGHT, 12, 0));
@@ -758,6 +777,41 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     }
 
     /**
+     * Đồng hồ cả trận chỉ để hiển thị; Server tự kết thúc trận khi hết giờ (GAME_OVER lý do TIME_UP).
+     */
+    private void startMatchTimer(int seconds) {
+        stopMatchTimer();
+        matchRemainingSeconds = seconds;
+        updateMatchInfoDisplay();
+        matchCountdownTimer = new Timer(1000, e -> {
+            if (matchRemainingSeconds > 0) {
+                matchRemainingSeconds--;
+                updateMatchInfoDisplay();
+            }
+        });
+        matchCountdownTimer.start();
+    }
+
+    private void stopMatchTimer() {
+        if (matchCountdownTimer != null) {
+            matchCountdownTimer.stop();
+            matchCountdownTimer = null;
+        }
+    }
+
+    private void updateMatchInfoDisplay() {
+        if (lblMatchInfo == null) return;
+        String time = String.format("%02d:%02d", matchRemainingSeconds / 60, matchRemainingSeconds % 60);
+        lblMatchInfo.setText("Trận " + matchNumber + "  •  còn " + time);
+        lblMatchInfo.setForeground(matchRemainingSeconds <= 30 ? COLOR_RED_VAL : TEXT_MUTED);
+    }
+
+    private void updateSeriesScoreDisplay() {
+        if (lblMatchScore == null) return;
+        lblMatchScore.setText("Tỉ số: " + winsRed + " - " + winsBlue);
+    }
+
+    /**
      * Xác nhận khi người chơi nhấn nút "Thoát" hoặc đóng cửa sổ
      */
     private void confirmAndExit() {
@@ -785,6 +839,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         btnRematchDialog = null;
         lblRematchNotice = null;
         stopTurnTimer();
+        stopMatchTimer();
         dispose();
         if (lobbyFrame != null) {
             lobbyFrame.setVisible(true);
@@ -860,10 +915,26 @@ public class GameBoardFrame extends JFrame implements MessageListener {
                 }
                 break;
 
+            case Protocol.CMD_MATCH_INFO:
+                // S -> C: MATCH_INFO;số_thứ_tự_trận;thắng_đỏ;thắng_xanh;giây_còn_lại
+                if (parts.length >= 5) {
+                    matchNumber = Integer.parseInt(parts[1]);
+                    winsRed = Integer.parseInt(parts[2]);
+                    winsBlue = Integer.parseInt(parts[3]);
+                    updateSeriesScoreDisplay();
+                    startMatchTimer(Integer.parseInt(parts[4]));
+                }
+                break;
+
             case Protocol.CMD_GAME_OVER:
-                // S -> C: GAME_OVER;winner_user;reason
+                // S -> C: GAME_OVER;winner_user;reason;thắng_đỏ;thắng_xanh
                 String winner = (parts.length >= 2) ? parts[1] : "";
                 String reason = (parts.length >= 3) ? parts[2] : "";
+                if (parts.length >= 5) {
+                    winsRed = Integer.parseInt(parts[3]);
+                    winsBlue = Integer.parseInt(parts[4]);
+                    updateSeriesScoreDisplay();
+                }
                 handleGameOver(winner, reason);
                 break;
 
@@ -922,6 +993,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
     @Override
     public void onDisconnected(String reason) {
         stopTurnTimer();
+        stopMatchTimer();
         JOptionPane.showMessageDialog(this,
                 "Mất kết nối tới Server!\nVui lòng đăng nhập lại.",
                 "Mất kết nối", JOptionPane.WARNING_MESSAGE);
@@ -971,7 +1043,6 @@ public class GameBoardFrame extends JFrame implements MessageListener {
 
         lblRedScore.setText(String.valueOf(scRed));
         lblBlueScore.setText(String.valueOf(scBlue));
-        lblMatchScore.setText("Tỉ số: " + scRed + " - " + scBlue);
 
         boardPanel.repaint();
     }
@@ -989,9 +1060,10 @@ public class GameBoardFrame extends JFrame implements MessageListener {
      */
     private void handleGameOver(String winner, String reason) {
         stopTurnTimer();
+        stopMatchTimer();
 
         boolean isWin = currentUser.equalsIgnoreCase(winner);
-        boolean isDraw = "DRAW".equalsIgnoreCase(winner) || "HÒA".equalsIgnoreCase(winner);
+        boolean isDraw = Protocol.WINNER_DRAW.equalsIgnoreCase(winner) || "HÒA".equalsIgnoreCase(winner);
 
         String title;
         String statusText;
@@ -1016,13 +1088,16 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         } else if (Protocol.REASON_TIMEOUT.equalsIgnoreCase(reason)) {
             reasonDesc = (isWin ? "Đối thủ" : "Bạn") + " đã hết giờ "
                     + Protocol.MAX_CONSECUTIVE_TIMEOUTS + " lượt liên tiếp.";
+        } else if (Protocol.REASON_TIME_UP.equalsIgnoreCase(reason)) {
+            reasonDesc = "Hết " + (Protocol.MATCH_TIME_SECONDS / 60) + " phút: Đỏ " + scoreRed
+                    + " ô - Xanh " + scoreBlue + " ô.";
         }
 
         // Tạo Dialog hiện đại đồng bộ giao diện
         if (gameOverDialog != null && gameOverDialog.isShowing()) {
             gameOverDialog.dispose();
         }
-        gameOverDialog = new JDialog(this, "Kết thúc trận đấu", true);
+        gameOverDialog = new JDialog(this, "Kết thúc trận " + matchNumber, true);
         gameOverDialog.setSize(440, 310);
         gameOverDialog.setLocationRelativeTo(this);
         gameOverDialog.setResizable(false);
@@ -1044,7 +1119,8 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         lblStatus.setForeground(TEXT_MAIN);
         lblStatus.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        JLabel lblFinalScore = new JLabel("Tỉ số chung cuộc: " + scoreRed + " - " + scoreBlue, SwingConstants.CENTER);
+        JLabel lblFinalScore = new JLabel("Tỉ số sau " + matchNumber + " trận: " + winsRed + " - " + winsBlue
+                + "  (Đỏ - Xanh)", SwingConstants.CENTER);
         lblFinalScore.setFont(new Font(AppUI.FONT, Font.BOLD, 16));
         lblFinalScore.setForeground(PRIMARY);
         lblFinalScore.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -1188,7 +1264,8 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         scoreBlue = 0;
         lblRedScore.setText("0");
         lblBlueScore.setText("0");
-        lblMatchScore.setText("Tỉ số: 0 - 0");
+        // Số thứ tự trận và đồng hồ trận được cập nhật khi nhận MATCH_INFO của trận mới
+        stopMatchTimer();
         this.currentTurn = Protocol.COLOR_RED;
         updateTurnDisplay();
         startTurnTimer(Protocol.TURN_TIME_SECONDS);

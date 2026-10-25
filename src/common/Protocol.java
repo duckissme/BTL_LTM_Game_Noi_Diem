@@ -61,6 +61,15 @@ public class Protocol {
     /** S -> C:  START_GAME;tên_đối_thủ;màu_quân;màu_lượt_đi (màu: RED/BLUE) */
     public static final String CMD_START_GAME = "START_GAME";
 
+    /**
+     * S -> C:  MATCH_INFO;số_thứ_tự_trận;số_trận_thắng_đỏ;số_trận_thắng_xanh;số_giây_còn_lại_của_trận
+     * Gửi ngay sau START_GAME (trận 1) và mỗi lần 2 bên đồng ý chơi tiếp (trận 2, 3, ...).
+     */
+    public static final String CMD_MATCH_INFO = "MATCH_INFO";
+
+    /** Thời gian tối đa của 1 trận (giây). Hết giờ thì ai chiếm nhiều ô hơn thắng, bằng ô thì hòa. */
+    public static final int MATCH_TIME_SECONDS = 4 * 60;
+
     /** C -> S:  MOVE;H|V;hàng;cột */
     public static final String CMD_MOVE = "MOVE";
 
@@ -92,8 +101,15 @@ public class Protocol {
     /** C -> S:  LEAVE_ROOM (thoát ván về sảnh) */
     public static final String CMD_LEAVE_ROOM = "LEAVE_ROOM";
 
-    /** S -> C:  GAME_OVER;người_thắng;lý_do (lý do: FULL_BOARD, SURRENDER, TIMEOUT) */
+    /**
+     * S -> C:  GAME_OVER;người_thắng;lý_do;số_trận_thắng_đỏ;số_trận_thắng_xanh
+     * người_thắng = DRAW nếu hòa. lý_do: FULL_BOARD, SURRENDER, TIMEOUT, TIME_UP.
+     * Số trận thắng là tỉ số của chuỗi trận giữa 2 người (đã tính cả trận vừa xong, trận hòa không cộng).
+     */
     public static final String CMD_GAME_OVER = "GAME_OVER";
+
+    /** Giá trị người_thắng trong GAME_OVER khi 2 bên hòa */
+    public static final String WINNER_DRAW = "DRAW";
 
     // =====================================================================
     // 5. TÁI ĐẤU (REMATCH)
@@ -132,14 +148,14 @@ public class Protocol {
     public static final String CMD_GET_HISTORY = "GET_HISTORY";
 
     /**
-     * S -> C:  HISTORY;tên_người_chơi;tổng,thắng,thua;trận|trận|...
+     * S -> C:  HISTORY;tên_người_chơi;tổng,thắng,thua,hòa;trận|trận|...
      * Mọi số liệu tính theo góc nhìn của tên_người_chơi. Danh sách xếp mới nhất trước,
      * tối đa HISTORY_LIMIT trận (phần tổng kết tính trên TẤT CẢ các trận).
      * Mỗi trận: đối_thủ,màu_quân,điểm_mình,điểm_đối_thủ,kết_quả,lý_do,thời_điểm
-     *   - kết_quả:   WIN / LOSE / UNKNOWN (trận cũ chưa lưu người thắng và kết thúc sớm)
-     *   - lý_do:     FULL_BOARD / SURRENDER / TIMEOUT (để trống với trận cũ chưa lưu lý do)
+     *   - kết_quả:   WIN / LOSE / DRAW / UNKNOWN (trận cũ chưa lưu người thắng và kết thúc sớm)
+     *   - lý_do:     FULL_BOARD / SURRENDER / TIMEOUT / TIME_UP (để trống với trận cũ chưa lưu lý do)
      *   - thời_điểm: số mili-giây tính từ 01/01/1970 (epoch millis)
-     * Không có kết quả hòa: bàn cờ có 25 ô (số lẻ) nên luôn có người thắng.
+     * Hòa chỉ xảy ra khi hết MATCH_TIME_SECONDS mà 2 bên chiếm số ô bằng nhau.
      */
     public static final String CMD_HISTORY = "HISTORY";
     /** S -> C:  HISTORY_FAIL;lý_do (người chơi không tồn tại hoặc lỗi cơ sở dữ liệu) */
@@ -147,12 +163,15 @@ public class Protocol {
 
     public static final String RESULT_WIN = "WIN";
     public static final String RESULT_LOSE = "LOSE";
+    public static final String RESULT_DRAW = "DRAW";
     public static final String RESULT_UNKNOWN = "UNKNOWN";
 
     public static final String REASON_FULL_BOARD = "FULL_BOARD";
     public static final String REASON_SURRENDER = "SURRENDER";
     /** Hết giờ MAX_CONSECUTIVE_TIMEOUTS lượt liên tiếp */
     public static final String REASON_TIMEOUT = "TIMEOUT";
+    /** Hết MATCH_TIME_SECONDS của trận */
+    public static final String REASON_TIME_UP = "TIME_UP";
 
     /** Số trận gần nhất tối đa gửi về trong HISTORY */
     public static final int HISTORY_LIMIT = 50;

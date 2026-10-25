@@ -27,11 +27,8 @@ import java.util.function.Consumer;
  * (Server đã tính sẵn thắng/thua và tổng kết), không tự truy vấn hay tính toán kết quả.
  *
  *  1. Hàng thẻ tổng kết: Tổng trận / Thắng / Thua / Tỉ lệ thắng.
- *  2. Bảng các trận gần nhất: Thời gian, Đối thủ, Phe, Tỉ số, Kết quả, Ghi chú.
+ *  2. Bảng các trận gần nhất: Thời gian, Đối thủ, Phe, Tỉ số, Kết quả, Điểm cộng, Ghi chú.
  *     Nhấp đúp vào một trận để xem tiếp lịch sử của đối thủ trong trận đó.
- *
- * Không có kết quả hòa (bàn cờ 25 ô luôn có người thắng). "Không rõ" chỉ dành cho
- * trận cũ kết thúc sớm từ trước khi CSDL lưu người thắng.
  */
 final class MatchHistoryDialog extends JDialog {
 
@@ -47,6 +44,8 @@ final class MatchHistoryDialog extends JDialog {
     private static final Color WIN_BG = new Color(220, 252, 231);
     private static final Color LOSE_FG = new Color(185, 28, 28);
     private static final Color LOSE_BG = new Color(254, 226, 226);
+    private static final Color DRAW_FG = new Color(37, 99, 235);
+    private static final Color DRAW_BG = new Color(239, 246, 255);
     private static final Color UNKNOWN_FG = new Color(71, 85, 105);
     private static final Color UNKNOWN_BG = new Color(241, 245, 249);
     private static final Color RATE_FG = new Color(180, 83, 9);
@@ -54,16 +53,17 @@ final class MatchHistoryDialog extends JDialog {
 
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy  HH:mm");
 
-    // Thứ tự cột trong bảng
+    // Thứ tự cột trong bảng sau khi bổ sung cột Điểm cộng
     private static final int COL_TIME = 0;
     private static final int COL_OPPONENT = 1;
     private static final int COL_SIDE = 2;
     private static final int COL_SCORE = 3;
     private static final int COL_RESULT = 4;
-    private static final int COL_NOTE = 5;
+    private static final int COL_POINTS = 5;
+    private static final int COL_NOTE = 6;
 
-    private final String viewedUser;   // Người chơi đang được xem lịch sử
-    private final boolean isSelf;      // true nếu đang xem lịch sử của chính mình
+    private final String viewedUser;          // Người chơi đang được xem lịch sử
+    private final boolean isSelf;             // true nếu đang xem lịch sử của chính mình
     private final Consumer<String> onViewPlayer; // Yêu cầu xem lịch sử người khác (Lobby gửi GET_HISTORY)
 
     /**
@@ -80,8 +80,8 @@ final class MatchHistoryDialog extends JDialog {
         this.isSelf = isSelf;
         this.onViewPlayer = onViewPlayer;
 
-        setSize(820, 580);
-        setMinimumSize(new Dimension(720, 460));
+        setSize(850, 580);
+        setMinimumSize(new Dimension(750, 460));
         setLocationRelativeTo(owner);
         setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
 
@@ -108,9 +108,9 @@ final class MatchHistoryDialog extends JDialog {
     // PHÂN TÍCH DỮ LIỆU GÓI HISTORY
     // =========================================================================
 
-    /** @return {tổng, thắng, thua} */
+    /** @return {tổng, thắng, thua, hòa} */
     private static int[] parseSummary(String summary) {
-        int[] stats = new int[3];
+        int[] stats = new int[4];
         String[] fields = summary == null ? new String[0] : summary.split(",");
         for (int i = 0; i < stats.length && i < fields.length; i++) {
             try {
@@ -122,7 +122,7 @@ final class MatchHistoryDialog extends JDialog {
     }
 
     private static DefaultTableModel createModel() {
-        String[] columns = {"Thời gian", "Đối thủ", "Phe", "Tỉ số", "Kết quả", "Ghi chú"};
+        String[] columns = {"Thời gian", "Đối thủ", "Phe", "Tỉ số", "Kết quả", "Điểm cộng", "Ghi chú"};
         return new DefaultTableModel(columns, 0) {
             @Override
             public boolean isCellEditable(int row, int col) {
@@ -141,7 +141,6 @@ final class MatchHistoryDialog extends JDialog {
 
         int count = 0;
         for (String record : records.split(Protocol.LIST_DELIMITER)) {
-            // limit -1: giữ lại ô trống (lý do của trận cũ để trống)
             String[] f = record.split(",", -1);
             if (f.length < 7) continue;
 
@@ -152,11 +151,31 @@ final class MatchHistoryDialog extends JDialog {
                     f[1].trim(),
                     f[2].trim() + "  -  " + f[3].trim(),
                     result,
+                    formatPointsChange(result),
                     describeReason(f[5].trim(), result)
             });
             count++;
         }
         return count;
+    }
+
+    /**
+     * Tính toán chuỗi điểm cộng/trừ theo kết quả trận đấu:
+     * - Thắng: +10
+     * - Thua: -10
+     * - Hòa: +5
+     */
+    private static String formatPointsChange(String result) {
+        if (Protocol.RESULT_WIN.equalsIgnoreCase(result) || "WIN".equalsIgnoreCase(result)) {
+            return "+10";
+        }
+        if (Protocol.RESULT_LOSE.equalsIgnoreCase(result) || "LOSE".equalsIgnoreCase(result)) {
+            return "-10";
+        }
+        if ("DRAW".equalsIgnoreCase(result) || "HÒA".equalsIgnoreCase(result) || "Hòa".equalsIgnoreCase(result)) {
+            return "+5";
+        }
+        return "—";
     }
 
     private static String formatTime(String epochMillis) {
@@ -182,6 +201,9 @@ final class MatchHistoryDialog extends JDialog {
             if (Protocol.RESULT_WIN.equalsIgnoreCase(result)) return "Đối thủ hết giờ";
             return isSelf ? "Bạn hết giờ" : viewedUser + " hết giờ";
         }
+        if (Protocol.REASON_TIME_UP.equalsIgnoreCase(reason)) {
+            return "Hết " + (Protocol.MATCH_TIME_SECONDS / 60) + " phút";
+        }
         if (Protocol.RESULT_UNKNOWN.equalsIgnoreCase(result)) {
             return "Chưa lưu kết quả";
         }
@@ -201,7 +223,7 @@ final class MatchHistoryDialog extends JDialog {
         lblTitle.setForeground(TEXT_MAIN);
 
         int total = stats[0];
-        int unknown = total - stats[1] - stats[2];
+        int unknown = total - stats[1] - stats[2] - stats[3];
         String sub = total > shown ? "Hiển thị " + shown + " trận gần nhất" : "Toàn bộ các trận đã đấu";
         if (unknown > 0) {
             sub += "  •  " + unknown + " trận cũ không rõ kết quả";
@@ -219,14 +241,14 @@ final class MatchHistoryDialog extends JDialog {
     private JPanel createStatsRow(int[] stats) {
         int wins = stats[1];
         int losses = stats[2];
-        // Tỉ lệ thắng chỉ tính trên các trận biết rõ kết quả
         String rate = (wins + losses) == 0 ? "—" : Math.round(wins * 100.0 / (wins + losses)) + "%";
 
-        JPanel row = new JPanel(new GridLayout(1, 4, 10, 0));
+        JPanel row = new JPanel(new GridLayout(1, 5, 10, 0));
         row.setOpaque(false);
         row.add(new StatTile("Tổng trận", String.valueOf(stats[0]), AppUI.PRIMARY, new Color(239, 246, 255)));
         row.add(new StatTile("Thắng", String.valueOf(wins), WIN_FG, WIN_BG));
         row.add(new StatTile("Thua", String.valueOf(losses), LOSE_FG, LOSE_BG));
+        row.add(new StatTile("Hòa", String.valueOf(stats[3]), DRAW_FG, DRAW_BG));
         row.add(new StatTile("Tỉ lệ thắng", rate, RATE_FG, RATE_BG));
         return row;
     }
@@ -262,7 +284,6 @@ final class MatchHistoryDialog extends JDialog {
         table.setSelectionForeground(TEXT_MAIN);
         table.setFillsViewportHeight(true);
 
-        // Nhấp đúp vào một trận -> xem lịch sử của đối thủ trong trận đó
         table.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -289,7 +310,8 @@ final class MatchHistoryDialog extends JDialog {
             return lbl;
         });
 
-        int[] widths = {150, 150, 90, 90, 100, 150};
+        // Tối ưu kích thước 7 cột
+        int[] widths = {140, 130, 75, 80, 95, 85, 135};
         for (int i = 0; i < widths.length; i++) {
             table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
         }
@@ -298,6 +320,7 @@ final class MatchHistoryDialog extends JDialog {
         table.getColumnModel().getColumn(COL_SIDE).setCellRenderer(new SideRenderer());
         table.getColumnModel().getColumn(COL_SCORE).setCellRenderer(new ScoreRenderer());
         table.getColumnModel().getColumn(COL_RESULT).setCellRenderer(new ResultRenderer());
+        table.getColumnModel().getColumn(COL_POINTS).setCellRenderer(new PointsRenderer());
         table.getColumnModel().getColumn(COL_NOTE).setCellRenderer(new TextRenderer(false, TEXT_MUTED, SwingConstants.CENTER));
 
         JScrollPane scroll = new JScrollPane(table);
@@ -323,8 +346,9 @@ final class MatchHistoryDialog extends JDialog {
     }
 
     private static Color resultFg(String result) {
-        if (Protocol.RESULT_WIN.equalsIgnoreCase(result)) return WIN_FG;
-        if (Protocol.RESULT_LOSE.equalsIgnoreCase(result)) return LOSE_FG;
+        if (Protocol.RESULT_WIN.equalsIgnoreCase(result) || "WIN".equalsIgnoreCase(result)) return WIN_FG;
+        if (Protocol.RESULT_LOSE.equalsIgnoreCase(result) || "LOSE".equalsIgnoreCase(result)) return LOSE_FG;
+        if ("DRAW".equalsIgnoreCase(result) || "HÒA".equalsIgnoreCase(result) || "Hòa".equalsIgnoreCase(result)) return DRAW_FG;
         return UNKNOWN_FG;
     }
 
@@ -399,7 +423,34 @@ final class MatchHistoryDialog extends JDialog {
         }
     }
 
-    /** Ô "Kết quả": viên thuốc Thắng / Thua / Không rõ */
+    /** Ô "Điểm cộng": +10 (xanh lục), -10 (đỏ), +5 (xanh lam) */
+    private static class PointsRenderer extends DefaultTableCellRenderer {
+        PointsRenderer() {
+            setHorizontalAlignment(SwingConstants.CENTER);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                                                       boolean isSelected, boolean hasFocus, int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, false, row, column);
+            setFont(new Font(AppUI.FONT, Font.BOLD, 13));
+            String val = String.valueOf(value);
+            if (val.startsWith("+10")) {
+                setForeground(WIN_FG);
+            } else if (val.startsWith("-10")) {
+                setForeground(LOSE_FG);
+            } else if (val.startsWith("+5")) {
+                setForeground(DRAW_FG);
+            } else {
+                setForeground(TEXT_MUTED);
+            }
+            setBackground(cellBg(isSelected));
+            setBorder(null);
+            return this;
+        }
+    }
+
+    /** Ô "Kết quả": viên thuốc Thắng / Thua / Hòa / Không rõ */
     private static class ResultRenderer implements TableCellRenderer {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value,
@@ -407,12 +458,15 @@ final class MatchHistoryDialog extends JDialog {
             String result = String.valueOf(value);
             String text;
             Color bg;
-            if (Protocol.RESULT_WIN.equalsIgnoreCase(result)) {
+            if (Protocol.RESULT_WIN.equalsIgnoreCase(result) || "WIN".equalsIgnoreCase(result)) {
                 text = "Thắng";
                 bg = WIN_BG;
-            } else if (Protocol.RESULT_LOSE.equalsIgnoreCase(result)) {
+            } else if (Protocol.RESULT_LOSE.equalsIgnoreCase(result) || "LOSE".equalsIgnoreCase(result)) {
                 text = "Thua";
                 bg = LOSE_BG;
+            } else if ("DRAW".equalsIgnoreCase(result) || "HÒA".equalsIgnoreCase(result) || "Hòa".equalsIgnoreCase(result)) {
+                text = "Hòa";
+                bg = DRAW_BG;
             } else {
                 text = "Không rõ";
                 bg = UNKNOWN_BG;

@@ -13,6 +13,8 @@ import java.util.concurrent.TimeUnit;
 /**
  * GameRoom: Quản lý một phòng đấu 1vs1 giữa 2 người chơi.
  * Server tự đếm giờ mỗi lượt: hết Protocol.TURN_TIME_SECONDS giây mà chưa đi thì mất lượt.
+ * Mỗi trận tối đa Protocol.MATCH_TIME_SECONDS giây: hết giờ thì ai chiếm nhiều ô hơn thắng, bằng ô thì hòa.
+ * Phòng giữ nguyên khi 2 bên chơi tiếp, nên đếm được số thứ tự trận và tỉ số thắng giữa 2 người.
  */
 public class GameRoom {
 
@@ -39,6 +41,15 @@ public class GameRoom {
     // Số lần hết giờ LIÊN TIẾP của mỗi phe (đi được 1 nước thì về 0)
     private int timeoutsRed = 0;
     private int timeoutsBlue = 0;
+
+    // Hẹn giờ kết thúc trận (MATCH_TIME_SECONDS), chống hẹn giờ cũ chạy trễ giống turnSeq
+    private ScheduledFuture<?> matchTimeoutTask;
+    private int matchSeq = 0;
+
+    // Trận thứ mấy giữa 2 người (trận đầu = 1, mỗi lần chơi tiếp +1) và số trận thắng mỗi bên (hòa không cộng)
+    private int matchNumber = 1;
+    private int winsRed = 0;
+    private int winsBlue = 0;
 
     public GameRoom(String roomId, ClientHandler playerRed, ClientHandler playerBlue) {
         this.roomId = roomId;
@@ -84,7 +95,7 @@ public class GameRoom {
                     + playerRed.getPlayerInfo().getUsername() + Protocol.DELIMITER
                     + Protocol.COLOR_BLUE + Protocol.DELIMITER
                     + currentTurn);
-            restartTurnTimer();
+            startMatch();
         }
     }
 
@@ -151,6 +162,40 @@ public class GameRoom {
     }
 
     // =========================================================================
+    // ĐẾM GIỜ CẢ TRẬN
+    // =========================================================================
+
+    /**
+     * Báo số thứ tự trận + tỉ số cho 2 người, bắt đầu đếm giờ trận và lượt đầu tiên.
+     */
+    private void startMatch() {
+        broadcast(Protocol.CMD_MATCH_INFO + Protocol.DELIMITER
+                + matchNumber + Protocol.DELIMITER
+                + winsRed + Protocol.DELIMITER
+                + winsBlue + Protocol.DELIMITER
+                + Protocol.MATCH_TIME_SECONDS);
+        cancelMatchTimer();
+        final int seq = ++matchSeq;
+        matchTimeoutTask = TURN_TIMER.schedule(() -> handleMatchTimeout(seq), Protocol.MATCH_TIME_SECONDS, TimeUnit.SECONDS);
+        announceTurn();
+    }
+
+    private void cancelMatchTimer() {
+        if (matchTimeoutTask != null) {
+            matchTimeoutTask.cancel(false);
+            matchTimeoutTask = null;
+        }
+    }
+
+    /**
+     * Chạy trên luồng Turn-Timer khi hết giờ trận: so số ô, bằng nhau thì hòa.
+     */
+    private synchronized void handleMatchTimeout(int seq) {
+        if (isFinished || seq != matchSeq) return;
+        finishGame(Protocol.REASON_TIME_UP);
+    }
+
+    // =========================================================================
     // ĐẾM GIỜ MỖI LƯỢT
     // =========================================================================
 
@@ -200,9 +245,13 @@ public class GameRoom {
         if (isFinished) return;
         isFinished = true;
         cancelTurnTimer();
+        cancelMatchTimer();
         ClientHandler winner = getOpponent(loser);
         String winnerUser = (winner != null && winner.getPlayerInfo() != null) ? winner.getPlayerInfo().getUsername() : "UNKNOWN";
-        broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER + winnerUser + Protocol.DELIMITER + reason);
+        if (winner != null) {
+            if (winner == playerRed) winsRed++; else winsBlue++;
+        }
+        broadcastGameOver(winnerUser, reason);
         saveResult(winnerUser, reason);
     }
 
@@ -220,13 +269,24 @@ public class GameRoom {
         if (isFinished) return;
         isFinished = true;
         cancelTurnTimer();
+        cancelMatchTimer();
 
         String redUser = playerRed.getPlayerInfo().getUsername();
         String blueUser = playerBlue.getPlayerInfo().getUsername();
         String winner = engine.getWinner(redUser, blueUser);
+        if (winner.equals(redUser)) winsRed++;
+        else if (winner.equals(blueUser)) winsBlue++;
 
-        broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER + winner + Protocol.DELIMITER + reason);
+        broadcastGameOver(winner, reason);
         saveResult(winner, reason);
+    }
+
+    private void broadcastGameOver(String winner, String reason) {
+        broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER
+                + winner + Protocol.DELIMITER
+                + reason + Protocol.DELIMITER
+                + winsRed + Protocol.DELIMITER
+                + winsBlue);
     }
 
     private void saveResult(String winner, String reason) {
@@ -250,7 +310,8 @@ public class GameRoom {
         currentTurn = Protocol.COLOR_RED;
         timeoutsRed = 0;
         timeoutsBlue = 0;
-        announceTurn();
+        matchNumber++;
+        startMatch();
     }
 
     public void broadcast(String message) {
