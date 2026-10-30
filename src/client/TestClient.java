@@ -4,6 +4,9 @@ import java.io.*;
 import java.net.Socket;
 import java.util.Scanner;
 
+/**
+ * Dummy Client giao diện dòng lệnh (CLI) phục vụ việc kiểm thử nhanh các lệnh Protocol qua terminal.
+ */
 public class TestClient {
     public static void main(String[] args) {
         try (Socket socket = new Socket("localhost", 8888);

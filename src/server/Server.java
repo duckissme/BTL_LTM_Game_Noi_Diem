@@ -5,6 +5,10 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Lớp chủ Server lắng nghe kết nối TCP trên cổng 8888.
+ * Quản lý danh sách các client đang trực tuyến và phát tán dữ liệu sảnh chờ.
+ */
 public class Server {
     private static final int PORT = 8888;
     
@@ -32,6 +36,11 @@ public class Server {
         }
     }
 
+    /**
+     * Tạo chuỗi dữ liệu danh sách người chơi online (loại trừ excludeUsername).
+     * @param excludeUsername tài khoản không muốn đưa vào danh sách (thường là chính người nhận)
+     * @return gói tin dạng "LOBBY_DATA;user,score,matches,status|..."
+     */
     public static String buildLobbyData(String excludeUsername) {
         StringBuilder sb = new StringBuilder();
         for (ClientHandler client : onlineUsers.values()) {
@@ -57,6 +66,10 @@ public class Server {
         return buildLobbyData(null);
     }
 
+    /**
+     * Phát tán danh sách người chơi online tới toàn bộ client đang kết nối.
+     * Mỗi client sẽ nhận được danh sách đã tự động loại bỏ tên của chính mình.
+     */
     public static void broadcastLobbyData() {
         for (ClientHandler client : onlineUsers.values()) {
             entity.Player p = client.getPlayerInfo();

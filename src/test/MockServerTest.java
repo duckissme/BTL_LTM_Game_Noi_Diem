@@ -13,6 +13,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
+/**
+ * Giả lập Server độc lập không cần CSDL MySQL để kiểm thử nhanh giao diện và luồng sự kiện của Client.
+ */
 public class MockServerTest {
     public static void main(String[] args) {
         new Thread(() -> {

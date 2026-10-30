@@ -13,9 +13,13 @@ public class Match {
     private int blueScore;
     private Timestamp finishedAt;
 
+    /** Khởi tạo trận đấu rỗng */
     public Match() {
     }
 
+    /**
+     * Khởi tạo trận đấu với ID hai người chơi và điểm số đạt được
+     */
     public Match(int playerRedId, int playerBlueId, int redScore, int blueScore) {
         this.playerRedId = playerRedId;
         this.playerBlueId = playerBlueId;

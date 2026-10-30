@@ -8,6 +8,10 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 
+/**
+ * Màn hình đăng nhập tài khoản người chơi.
+ * Nhận gói tin LOGIN_SUCCESS để chuyển tiếp vào sảnh chờ (LobbyFrame).
+ */
 public class LoginFrame extends JFrame implements MessageListener {
 
     private static final String LOGIN_TEXT = "Đăng nhập";
@@ -67,6 +71,9 @@ public class LoginFrame extends JFrame implements MessageListener {
         return form;
     }
 
+    /**
+     * Thu thập tài khoản, mật khẩu và gửi gói tin LOGIN lên Server.
+     */
     private void handleLogin() {
         String username = txtUsername.getText().trim();
         String password = new String(txtPassword.getPassword()).trim();
@@ -102,6 +109,7 @@ public class LoginFrame extends JFrame implements MessageListener {
         btnLogin.setEnabled(true);
     }
 
+    /** Mở dialog đăng ký nhanh (legacy fallback) */
     private void openRegisterDialog() {
         JDialog registerDialog = new JDialog(this, "Đăng ký tài khoản mới", true);
         registerDialog.setSize(360, 230);
@@ -158,6 +166,9 @@ public class LoginFrame extends JFrame implements MessageListener {
         registerDialog.setVisible(true);
     }
 
+    /**
+     * Tiếp nhận và phân tích phản hồi từ Server (LOGIN_SUCCESS, LOGIN_FAIL, v.v.).
+     */
     @Override
     public void onMessageReceived(String message) {
         String[] parts = message.split(Protocol.DELIMITER);

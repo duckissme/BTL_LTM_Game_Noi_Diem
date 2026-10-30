@@ -178,6 +178,7 @@ final class MatchHistoryDialog extends JDialog {
         return "—";
     }
 
+    /** Chuyển đổi timestamp mili-giây sang định dạng ngày giờ dd/MM/yyyy HH:mm */
     private static String formatTime(String epochMillis) {
         try {
             long ms = Long.parseLong(epochMillis);
@@ -188,6 +189,7 @@ final class MatchHistoryDialog extends JDialog {
         }
     }
 
+    /** Diễn giải mã lý do kết thúc trận thành văn bản thân thiện với người dùng */
     private String describeReason(String reason, String result) {
         if (Protocol.REASON_FULL_BOARD.equalsIgnoreCase(reason)) {
             return "Chiếm hết bàn cờ";

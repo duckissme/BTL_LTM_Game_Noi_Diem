@@ -127,6 +127,7 @@ public class GameEngine {
         return hLines[r][c] && hLines[r + 1][c] && vLines[r][c] && vLines[r][c + 1];
     }
 
+    /** Cộng điểm cho người chơi chiếm được ô */
     private void addScore(String playerColor) {
         if (Protocol.COLOR_RED.equalsIgnoreCase(playerColor)) {
             scoreRed++;
@@ -135,6 +136,7 @@ public class GameEngine {
         }
     }
 
+    /** Kiểm tra toàn bộ 25 ô trên bàn cờ đã được chiếm hết chưa */
     public boolean isGameOver() {
         return (scoreRed + scoreBlue) >= TOTAL_BOXES;
     }
@@ -147,6 +149,7 @@ public class GameEngine {
         return scoreBlue;
     }
 
+    /** Xác định người chiến thắng dựa trên số ô chiếm được, hoặc DRAW nếu bằng điểm */
     public String getWinner(String redUsername, String blueUsername) {
         if (scoreRed > scoreBlue) return redUsername;
         if (scoreBlue > scoreRed) return blueUsername;

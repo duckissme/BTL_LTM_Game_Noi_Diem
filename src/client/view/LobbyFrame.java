@@ -812,6 +812,9 @@ public class LobbyFrame extends JFrame implements MessageListener {
         new LoginFrame().setVisible(true); // LoginFrame tự đăng ký nhận gói tin trong constructor
     }
 
+    /**
+     * Nạp dữ liệu danh sách người chơi trực tuyến vào bảng Online và cập nhật số lượng badge.
+     */
     public void updateOnlineTable(String rawData) {
         modelOnline.setRowCount(0);
         if (rawData.trim().isEmpty()) {
@@ -842,6 +845,9 @@ public class LobbyFrame extends JFrame implements MessageListener {
         lblOnlineBadge.setText(count + " đang online");
     }
 
+    /**
+     * Nạp dữ liệu bảng xếp hạng cao thủ từ Server vào modelLeaderboard.
+     */
     public void updateLeaderboardTable(String rawData) {
         modelLeaderboard.setRowCount(0);
         if (rawData.trim().isEmpty()) return;

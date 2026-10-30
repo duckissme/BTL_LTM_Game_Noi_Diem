@@ -9,6 +9,10 @@ import java.io.*;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
+/**
+ * Luồng riêng biệt phụ trách kết nối và giao tiếp hai chiều với một Client cụ thể.
+ * Chịu trách nhiệm giải mã gói tin theo Protocol và điều phối logic nghiệp vụ tương ứng.
+ */
 public class ClientHandler extends Thread {
     private final Socket socket;
     private BufferedReader in;
@@ -24,6 +28,7 @@ public class ClientHandler extends Thread {
         return playerInfo;
     }
 
+    /** Gửi một dòng thông điệp dạng text UTF-8 tới client qua socket */
     public void sendMessage(String msg) {
         if (out != null) {
             out.println(msg);
@@ -31,6 +36,10 @@ public class ClientHandler extends Thread {
     }
 
     @Override
+    /**
+     * Vòng lặp chính của luồng client: liên tục đọc các dòng lệnh từ Socket,
+     * phân tách command theo dấu DELIMITER và điều hướng tới hàm xử lý thích hợp.
+     */
     public void run() {
         try {
             in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
@@ -110,6 +119,10 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Xử lý yêu cầu đăng nhập: kiểm tra thông tin qua UserDAO, chặn đăng nhập trùng,
+     * phản hồi kết quả và cập nhật trạng thái sảnh.
+     */
     private void handleLogin(String[] parts) {
         if (parts.length < 3) {
             sendMessage(Protocol.CMD_LOGIN_FAIL + Protocol.DELIMITER + "Thiếu thông tin đăng nhập!");
@@ -143,6 +156,9 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Xử lý yêu cầu đăng ký tài khoản mới qua UserDAO.
+     */
     private void handleRegister(String[] parts) {
         if (parts.length < 3) {
             sendMessage(Protocol.CMD_REGISTER_FAIL + Protocol.DELIMITER + "Thiếu thông tin đăng ký!");
@@ -163,6 +179,9 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Đồng bộ lại thông tin cá nhân và dữ liệu sảnh chờ khi client yêu cầu (GET_LOBBY).
+     */
     private void handleGetLobby() {
         if (playerInfo != null) {
             GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
@@ -181,6 +200,10 @@ public class ClientHandler extends Thread {
         sendMessage(Protocol.CMD_LEADERBOARD + Protocol.DELIMITER + UserDAO.getLeaderboard());
     }
 
+    /**
+     * Xử lý yêu cầu gửi lời mời thách đấu tới đối thủ: kiểm tra trạng thái đối thủ rỗi,
+     * lưu mục tiêu đang chờ và chuyển tiếp lời mời CHALLENGE_INVITE.
+     */
     private void handleChallengeReq(String[] parts) {
         if (parts.length < 2 || playerInfo == null) return;
         String target = parts[1].trim();
@@ -200,6 +223,10 @@ public class ClientHandler extends Thread {
         targetHandler.sendMessage(Protocol.CMD_CHALLENGE_INVITE + Protocol.DELIMITER + this.playerInfo.getUsername());
     }
 
+    /**
+     * Xử lý phản hồi thách đấu (ACCEPT hoặc REJECT). Nếu chấp nhận, chuyển cả hai sang
+     * trạng thái BUSY, phát sóng sảnh và tạo GameRoom mới để bắt đầu trận đấu.
+     */
     private void handleChallengeResp(String[] parts) {
         if (parts.length < 3 || playerInfo == null) return;
         String challenger = parts[1].trim();
@@ -234,6 +261,9 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Hủy lời mời thách đấu đã gửi trước khi đối thủ kịp phản hồi.
+     */
     private void handleChallengeCancel(String[] parts) {
         this.pendingChallengeTarget = null;
         if (parts.length < 2) return;
@@ -244,6 +274,9 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Chuyển tiếp yêu cầu tái đấu (REMATCH_REQ) tới đối thủ trong cùng phòng thi đấu.
+     */
     private void handleRematchReq() {
         if (this.playerInfo == null) return;
         GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
@@ -261,6 +294,9 @@ public class ClientHandler extends Thread {
         opponent.sendMessage(Protocol.CMD_REMATCH_INVITE);
     }
 
+    /**
+     * Xử lý câu trả lời tái đấu: nếu ACCEPT thì reset phòng chơi mới, nếu REJECT thì giải phóng phòng.
+     */
     private void handleRematchResp(String[] parts) {
         if (parts.length < 2 || playerInfo == null) return;
         String resp = parts[1].trim();
@@ -284,6 +320,9 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Xử lý tin nhắn trò chuyện: bảo toàn dấu phân cách, giới hạn độ dài an toàn tránh cắt đôi emoji surrogate.
+     */
     private void handleChat(String message) {
         if (playerInfo == null) return;
 
@@ -308,6 +347,9 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Tra cứu lịch sử các trận đấu của người chơi qua MatchDAO và gửi về client.
+     */
     private void handleGetHistory(String[] parts) {
         if (playerInfo == null) return; // Phải đăng nhập mới xem được lịch sử
 
@@ -329,6 +371,9 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Xử lý khi người chơi chủ động rời phòng đấu / xin hàng và quay trở lại sảnh chờ.
+     */
     private void handleLeaveRoom() {
         if (this.playerInfo != null) {
             GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());
@@ -348,6 +393,10 @@ public class ClientHandler extends Thread {
         }
     }
 
+    /**
+     * Dọn dẹp tài nguyên khi client đăng xuất hoặc ngắt kết nối đột ngột:
+     * xử thua nếu đang trong trận, xóa khỏi danh sách online và thông báo cập nhật sảnh.
+     */
     private void handleLogout() {
         if (this.playerInfo != null) {
             GameRoom room = RoomManager.findRoomByPlayer(playerInfo.getUsername());

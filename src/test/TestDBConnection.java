@@ -5,6 +5,9 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 
+/**
+ * Tiện ích kiểm tra kết nối trực tiếp tới CSDL MySQL và in ra danh sách tài khoản mẫu.
+ */
 public class TestDBConnection {
     public static void main(String[] args) {
         System.out.println("=== KIỂM TRA KẾT NỐI CƠ SỞ DỮ LIỆU MYSQL ===");

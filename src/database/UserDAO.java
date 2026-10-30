@@ -6,8 +6,17 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 
+/**
+ * Data Access Object quản lý truy vấn và cập nhật thông tin tài khoản người chơi trong bảng 'users'.
+ */
 public class UserDAO {
 
+    /**
+     * Xác thực thông tin đăng nhập từ cơ sở dữ liệu.
+     * @param username tên tài khoản
+     * @param password mật khẩu
+     * @return đối tượng Player nếu chính xác, null nếu sai thông tin hoặc lỗi kết nối
+     */
     public static Player checkLogin(String username, String password) {
         String query = "SELECT total_score, total_matches FROM users WHERE username = ? AND password = ?";
         try (Connection conn = DBConnection.getConnection()) {
@@ -34,6 +43,12 @@ public class UserDAO {
         return null;
     }
 
+    /**
+     * Đăng ký tài khoản mới vào hệ thống.
+     * @param username tên tài khoản cần đăng ký
+     * @param password mật khẩu
+     * @return 0 nếu thành công, 1 nếu tài khoản đã tồn tại, 2 nếu lỗi CSDL/hệ thống
+     */
     public static int register(String username, String password) {
         // Trả về: 0 = Thành công, 1 = Đã tồn tại, 2 = Lỗi hệ thống/DB
         String checkQuery = "SELECT id FROM users WHERE username = ?";
@@ -66,6 +81,10 @@ public class UserDAO {
         }
     }
 
+    /**
+     * Lấy danh sách Top 10 người chơi có điểm số cao nhất (ưu tiên điểm > số trận).
+     * @return chuỗi định dạng "tên,điểm,số_trận|tên,điểm,số_trận|..."
+     */
     public static String getLeaderboard() {
         StringBuilder rankStr = new StringBuilder();
         String query = "SELECT username, total_score, total_matches FROM users ORDER BY total_score DESC, total_matches DESC LIMIT 10";
@@ -98,6 +117,10 @@ public class UserDAO {
         return rankStr.toString();
     }
 
+    /**
+     * Đồng bộ lại điểm số và số trận mới nhất từ CSDL vào đối tượng Player trong bộ nhớ.
+     * @param player đối tượng người chơi cần làm mới dữ liệu
+     */
     public static void refreshPlayerInfo(Player player) {
         if (player == null || player.getUsername() == null) return;
         String query = "SELECT total_score, total_matches FROM users WHERE username = ?";
@@ -120,6 +143,11 @@ public class UserDAO {
         }
     }
 
+    /**
+     * Tìm kiếm và trả về thông tin người chơi theo tên tài khoản.
+     * @param username tên tài khoản cần tra cứu
+     * @return đối tượng Player nếu tìm thấy, null nếu không tồn tại hoặc lỗi CSDL
+     */
     public static Player getUserByUsername(String username) {
         if (username == null) return null;
         String query = "SELECT total_score, total_matches FROM users WHERE username = ?";

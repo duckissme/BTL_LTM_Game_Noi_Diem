@@ -7,6 +7,9 @@ import client.network.SocketClient;
 import javax.swing.*;
 import java.awt.*;
 
+/**
+ * Màn hình đăng ký tài khoản người chơi mới.
+ */
 public class RegisterFrame extends JFrame implements MessageListener {
 
     private static final String REGISTER_TEXT = "Đăng ký";
@@ -84,6 +87,7 @@ public class RegisterFrame extends JFrame implements MessageListener {
         return form;
     }
 
+    /** Kiểm tra mật khẩu hợp lệ (tối thiểu 6 ký tự) */
     private boolean validatePassword(String pass) {
         if (pass.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Vui lòng nhập mật khẩu!", "Lỗi nhập liệu", JOptionPane.WARNING_MESSAGE);
@@ -98,6 +102,7 @@ public class RegisterFrame extends JFrame implements MessageListener {
         return true;
     }
 
+    /** Xác thực form và gửi gói tin REGISTER lên Server */
     private void handleRegister() {
         String username = txtUsername.getText().trim();
         String password = new String(txtPassword.getPassword()).trim();
@@ -147,6 +152,7 @@ public class RegisterFrame extends JFrame implements MessageListener {
         btnRegister.setEnabled(true);
     }
 
+    /** Tiếp nhận kết quả phản hồi đăng ký từ Server (REGISTER_SUCCESS / REGISTER_FAIL) */
     @Override
     public void onMessageReceived(String message) {
         String[] parts = message.split(Protocol.DELIMITER);

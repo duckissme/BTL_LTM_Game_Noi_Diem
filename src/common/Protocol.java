@@ -1,5 +1,9 @@
 package common;
 
+/**
+ * Định nghĩa giao thức truyền thông điệp (Application Protocol) giữa Client và Server.
+ * Sử dụng chuỗi ký tự UTF-8, định dạng văn bản phân tách bởi DELIMITER (;) và LIST_DELIMITER (|).
+ */
 public class Protocol {
 
     public static final String DELIMITER = ";";

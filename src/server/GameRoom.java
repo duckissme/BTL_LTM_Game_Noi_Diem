@@ -148,6 +148,7 @@ public class GameRoom {
         }
     }
 
+    /** Chuyển lượt chơi giữa Đỏ và Xanh khi không có ô nào được khép kín */
     private void switchTurn() {
         currentTurn = Protocol.COLOR_RED.equalsIgnoreCase(currentTurn) ? Protocol.COLOR_BLUE : Protocol.COLOR_RED;
         announceTurn();
@@ -180,6 +181,7 @@ public class GameRoom {
         announceTurn();
     }
 
+    /** Hủy bộ đếm giờ tổng của trận */
     private void cancelMatchTimer() {
         if (matchTimeoutTask != null) {
             matchTimeoutTask.cancel(false);
@@ -199,12 +201,14 @@ public class GameRoom {
     // ĐẾM GIỜ MỖI LƯỢT
     // =========================================================================
 
+    /** Khởi động lại bộ đếm giờ lượt 30s với số seq mới */
     private void restartTurnTimer() {
         cancelTurnTimer();
         final int seq = ++turnSeq;
         turnTimeoutTask = TURN_TIMER.schedule(() -> handleTurnTimeout(seq), Protocol.TURN_TIME_SECONDS, TimeUnit.SECONDS);
     }
 
+    /** Hủy bộ đếm giờ lượt hiện tại */
     private void cancelTurnTimer() {
         if (turnTimeoutTask != null) {
             turnTimeoutTask.cancel(false);
@@ -265,6 +269,9 @@ public class GameRoom {
                 + content);
     }
 
+    /**
+     * Kết thúc ván đấu bình thường (hết bàn cờ hoặc hết giờ trận), tính người thắng và lưu DB.
+     */
     private void finishGame(String reason) {
         if (isFinished) return;
         isFinished = true;
@@ -281,6 +288,7 @@ public class GameRoom {
         saveResult(winner, reason);
     }
 
+    /** Gửi thông báo GAME_OVER tới cả hai bên kèm tỉ số chuỗi trận */
     private void broadcastGameOver(String winner, String reason) {
         broadcast(Protocol.CMD_GAME_OVER + Protocol.DELIMITER
                 + winner + Protocol.DELIMITER
@@ -289,6 +297,7 @@ public class GameRoom {
                 + winsBlue);
     }
 
+    /** Lưu kết quả trận đấu xuống CSDL và đồng bộ lại điểm trong bộ nhớ */
     private void saveResult(String winner, String reason) {
         if (playerRed != null && playerBlue != null) {
             String redUser = playerRed.getPlayerInfo().getUsername();
@@ -314,6 +323,7 @@ public class GameRoom {
         startMatch();
     }
 
+    /** Phát tán thông điệp tới cả hai người chơi trong phòng */
     public void broadcast(String message) {
         if (playerRed != null) playerRed.sendMessage(message);
         if (playerBlue != null) playerBlue.sendMessage(message);

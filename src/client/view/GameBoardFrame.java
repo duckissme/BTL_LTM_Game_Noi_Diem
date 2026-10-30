@@ -1022,6 +1022,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         boardPanel.repaint();
     }
 
+    /** Cập nhật mảng nét vẽ và vẽ lại bàn cờ theo lệnh DRAW_LINE từ Server */
     private void handleDrawLine(String type, int r, int c, String color) {
         if ("H".equalsIgnoreCase(type) && r < hLines.length && c < hLines[r].length) {
             hLines[r][c] = color;
@@ -1034,6 +1035,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         boardPanel.repaint();
     }
 
+    /** Cập nhật quyền sở hữu ô vuông và điểm số theo lệnh CAPTURE_BOX */
     private void handleCaptureBox(int r, int c, String color, int scRed, int scBlue) {
         if (r < boxes.length && c < boxes[r].length) {
             boxes[r][c] = color;
@@ -1047,6 +1049,7 @@ public class GameBoardFrame extends JFrame implements MessageListener {
         boardPanel.repaint();
     }
 
+    /** Cập nhật lượt chơi hiện tại và thiết lập lại đồng hồ đếm ngược 30s theo lệnh CHANGE_TURN */
     private void handleChangeTurn(String nextColor, int remainingTime) {
         this.currentTurn = nextColor;
         updateTurnDisplay();
